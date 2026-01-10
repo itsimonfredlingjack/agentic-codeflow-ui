@@ -241,7 +241,7 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
     };
 
     return (
-        <div className="grid h-screen w-full bg-[#000000] text-white overflow-hidden p-4 gap-4 transition-all duration-500 ease-in-out" style={{
+        <div className="grid h-screen w-full text-white overflow-hidden p-4 gap-4 transition-all duration-500 ease-in-out" style={{
             gridTemplateColumns: `${leftPanelOpen ? '260px' : '0px'} minmax(400px, 1fr) ${rightPanelOpen ? '340px' : '0px'}`,
             gridTemplateRows: 'auto 1fr',
             ['--active-aura' as any]: phases.find(p => p.id === currentPhase)?.color

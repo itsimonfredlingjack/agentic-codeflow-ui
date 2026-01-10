@@ -77,7 +77,7 @@ export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWor
     const RoleIcon = config.icon;
 
     return (
-        <div className="flex flex-col h-full relative overflow-hidden glass-panel rounded-xl group">
+        <div className="flex flex-col h-full relative overflow-hidden bg-gray-900/90 backdrop-blur-3xl border border-white/10 rounded-xl group shadow-2xl">
 
             {/* Header / StatusBar */}
             <div className="h-12 border-b border-white/10 flex items-center px-4 justify-between bg-black/20 backdrop-blur-md z-10 shrink-0">
