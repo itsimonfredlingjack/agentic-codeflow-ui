@@ -1,36 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Glass Pipeline 💎
+
+> **AgencyOS: Project Glass Pipeline**
+> A futuristic, glassmorphism-based AI Agent Workspace.
+
+![Glass Console](https://via.placeholder.com/800x400?text=Glass+Console+UI)
+*Note: This is a UI concept. Connect your own backend agents to bring it to life.*
+
+## Overview
+
+The **Glass Pipeline** re-imagines the developer experience for the Agentic Era. It moves beyond simple text chat, offering a hybrid **Terminal/Desktop** interface where AI agents work alongside you in real-time.
+
+### Key Features
+
+- **🔮 Central Glass Console**: A unified workspace combining chat, terminal, and rich UI cards.
+- **⚡ Phase-Adaptive UI**: The interface morphs based on the agent's mode:
+    - **PLAN (Sapphire)**: Architecture and Blueprinting.
+    - **BUILD (Emerald)**: Coding and Terminal execution.
+    - **REVIEW (Amber)**: Security checks and Artifact hand-offs.
+    - **DEPLOY (Amethyst)**: Release management.
+- **🃏 Semantic Stream Cards**:
+    - **BlueprintCard**: Visualizes architecture JSONs.
+    - **BuildStatusCard**: Live progress bars for long-running tasks.
+    - **SecurityGateCard**: Policy check visualizations.
+    - **CodeBlockCard**: VS Code-style windows with syntax highlighting.
+- **🤖 AI Avatar**: A living, geometric hologram that represents the agent's cognitive state.
+
+## Tech Stack
+
+- **Framework**: Next.js 15 (App Router)
+- **State Management**: XState (Federated Orchestrator)
+- **Styling**: TailwindCSS + CSS Variables (Glassmorphism)
+- **Animation**: Framer Motion
 
 ## Getting Started
 
-First, run the development server:
+1. **Install Dependencies**
+   ```bash
+   npm install
+   ```
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+2. **Run Development Server**
+   ```bash
+   npm run dev
+   ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+3. **Open the Console**
+   Navigate to `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Architecture
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The application uses an **Orchestrator-Worker** pattern. `MissionControl.tsx` serves as the orchestrator (UI), maintaining the state machine (`missionControlMachine.ts`). It simulates agent events via a seeded loop, pushing structured data to the `AgentWorkspace`.
 
-## Learn More
+## "The Masterpiece"
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+This project was built as a demonstration of "Creative AI UI". It focuses on aesthetics (Glass, Glow, Blur) and interaction density (Haptic feedback, Semantic cards) to create a premium feel.
