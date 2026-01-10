@@ -1,4 +1,4 @@
-export type ActionType = 'command' | 'log' | 'error' | 'success' | 'plan' | 'plan_artifact' | 'build_status' | 'security_gate' | 'code';
+export type ActionType = 'command' | 'log' | 'analysis' | 'result' | 'error' | 'success' | 'plan' | 'plan_artifact' | 'build_status' | 'security_gate' | 'code';
 
 export interface AgentEvent {
     id: string;
@@ -11,6 +11,10 @@ export interface AgentEvent {
     // Context metadata
     phase: 'plan' | 'build' | 'review' | 'deploy';
     agentId: string;
+
+    // Standardized Fields
+    source?: string; // e.g. "Architect", "Builder"
+    payload?: any;   // Flexible payload for richer events
 
     // Refinement: Severity for filtering
     severity: 'info' | 'warn' | 'error';

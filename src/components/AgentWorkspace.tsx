@@ -108,8 +108,10 @@ export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWor
                             initial={{ opacity: 0, x: -10 }}
                             animate={{ opacity: 1, x: 0 }}
                             className={clsx(
-                                "max-w-3xl w-full",
-                                item.isUser ? "ml-auto" : "mr-auto"
+                                "w-full", // Full width container
+                                item.isUser ? "ml-auto max-w-xl" : "mr-auto",
+                                // Only constrain width for non-code items if needed, but flex-col handles it
+                                item.type !== 'code' && !item.isUser && "max-w-3xl"
                             )}
                         >
                             {item.isUser ? (

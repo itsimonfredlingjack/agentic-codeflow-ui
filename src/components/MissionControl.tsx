@@ -5,10 +5,13 @@ import { useMachine } from '@xstate/react';
 import { ReviewGate } from './ReviewGate';
 import { AgentWorkspace } from './AgentWorkspace';
 import { ActionCardProps } from '@/types';
-import { LayoutGrid, Cpu, Shield, Zap } from 'lucide-react';
+import { LayoutGrid, Cpu, Shield, Zap, Activity, PanelLeft, Settings } from 'lucide-react';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { missionControlMachine } from '@/machines/missionControlMachine';
+import { RunList } from './RunList';
+import { SettingsModal } from './SettingsModal';
+import { CommandPalette } from './CommandPalette';
 
 const phases = [
     { id: 'plan', label: 'PLAN', color: 'var(--sapphire)', icon: LayoutGrid },
@@ -66,6 +69,34 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
         snapshot: initialSnapshot
     });
     const [actions, setActions] = useState<ActionCardProps[]>([]);
+    const [leftPanelOpen, setLeftPanelOpen] = useState(true);
+    const [rightPanelOpen, setRightPanelOpen] = useState(true);
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState(false);
+
+    // Command Palette Logic
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                setIsCmdPaletteOpen(prev => !prev);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
+
+    const handleCommand = (cmdId: string) => {
+        switch (cmdId) {
+            case 'toggle-left': setLeftPanelOpen(prev => !prev); break;
+            case 'toggle-right': setRightPanelOpen(prev => !prev); break;
+            case 'open-settings': setIsSettingsOpen(true); break;
+            case 'new-run':
+                if (confirm("Start new session?")) send({ type: 'RESET_RUN' });
+                break;
+            case 'clear-logs': console.clear(); break; // Or implement clear state
+        }
+    };
 
     // Derived state for UI compatibility
     // Safe check using both direct string match and object match for hierarchical states
@@ -210,7 +241,9 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
     };
 
     return (
-        <div className="grid-bento transition-colors duration-1000 relative" style={{
+        <div className="grid h-screen w-full bg-[#000000] text-white overflow-hidden p-4 gap-4 transition-all duration-500 ease-in-out" style={{
+            gridTemplateColumns: `${leftPanelOpen ? '260px' : '0px'} minmax(400px, 1fr) ${rightPanelOpen ? '340px' : '0px'}`,
+            gridTemplateRows: 'auto 1fr',
             ['--active-aura' as any]: phases.find(p => p.id === currentPhase)?.color
         }}>
 
@@ -234,8 +267,21 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
             )}
 
             {/* 1. Header Board (Top) */}
-            <header className="col-span-3 glass-panel rounded-xl flex items-center justify-between px-6">
+            <header className="col-span-3 glass-panel rounded-xl flex items-center justify-between px-6 z-50 bg-[#000000]/20 backdrop-blur-md">
                 <div className="flex items-center gap-4">
+                    <button
+                        onClick={() => setLeftPanelOpen(!leftPanelOpen)}
+                        className={clsx("p-2 rounded hover:bg-white/10 text-white/40 hover:text-white transition-colors", !leftPanelOpen && "bg-white/5 text-emerald-400")}
+                    >
+                        <PanelLeft size={18} />
+                    </button>
+                    <button
+                        onClick={() => setIsSettingsOpen(true)}
+                        className="p-2 rounded hover:bg-white/10 text-white/40 hover:text-white transition-colors"
+                    >
+                        <Settings size={18} />
+                    </button>
+                    <div className="h-6 w-[1px] bg-white/10" />
                     <div className="text-xl font-bold tracking-widest text-white/90">AGENCY<span className="text-white/40">OS</span></div>
                     <div className="h-6 w-[1px] bg-white/10" />
                     <div className="text-xs font-mono text-white/50">PROJECT: GLASS PIPELINE</div>
@@ -272,6 +318,13 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
                 </div>
 
                 <div className="flex items-center gap-3">
+                    <div className="h-6 w-[1px] bg-white/10" />
+                    <button
+                        onClick={() => setRightPanelOpen(!rightPanelOpen)}
+                        className={clsx("p-2 rounded hover:bg-white/10 text-white/40 hover:text-white transition-colors", !rightPanelOpen && "bg-white/5 text-amber-400")}
+                    >
+                        <Activity size={18} />
+                    </button>
                     <div className={clsx("w-2 h-2 rounded-full", isLockdown ? "bg-red-500 animate-ping" : "animate-pulse")} style={{ background: isLockdown ? undefined : 'var(--active-aura)' }} />
                     <span className={clsx("text-xs font-mono", isLockdown ? "text-red-500 font-bold" : "text-white/50")}>
                         {isLockdown ? "LOCKDOWN" : "ONLINE"}
@@ -281,35 +334,29 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
 
             {/* 2. Context Panel (Left) - Sticky */}
             <aside className="glass-panel p-4 rounded-xl flex flex-col gap-4 relative">
-                <div className="flex flex-col gap-2 border-b border-white/5 pb-4 relative">
-                    <div className="text-xs font-bold text-white/40 uppercase tracking-widest">Active Run</div>
-                    <div className="font-mono text-sm text-emerald-400">#{snapshot.context.runId}</div>
-                    <div className="text-[10px] text-white/50">Started 14:02:45</div>
+                <div className="flex-1 overflow-hidden flex flex-col gap-4">
+                    {/* Active Run Card */}
+                    <div className="flex flex-col gap-2 border-b border-white/5 pb-4">
+                        <div className="flex items-center justify-between">
+                            <div className="text-xs font-bold text-white/40 uppercase tracking-widest">Active Run</div>
+                            <button
+                                onClick={() => {
+                                    if (confirm("New Run?")) send({ type: 'RESET_RUN' });
+                                }}
+                                className="text-[10px] bg-white/5 hover:bg-white/10 px-2 py-1 rounded text-white/60 hover:text-white transition-colors"
+                            >
+                                + NEW
+                            </button>
+                        </div>
+                        <div className="font-mono text-sm text-emerald-400">#{snapshot.context.runId}</div>
+                        <div className="text-[10px] text-white/50">Started 14:02:45</div>
+                    </div>
 
-                    <button
-                        onClick={async () => {
-                            if (confirm("Detta kommer att nollställa sessionen. Fortsätt?")) {
-                                send({ type: 'RESET_RUN' });
-                                // Force backend clear to avoid rehydrating old 'deploy' state
-                                try {
-                                    await fetch('/api/run', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({
-                                            id: 'RESET-' + Date.now(),
-                                            context: null,
-                                            status: 'idle'
-                                        })
-                                    });
-                                } catch (e) { }
-                                window.location.reload();
-                            }
-                        }}
-                        className="mt-2 text-[10px] uppercase font-bold text-white/20 hover:text-white/60 transition-colors border border-white/5 rounded px-2 py-1 flex items-center gap-1 w-fit"
-                    >
-                        <Zap size={10} />
-                        Hard Reset
-                    </button>
+                    {/* Run List */}
+                    <RunList
+                        currentRunId={`run-${snapshot.context.runId}`}
+                        onSelectRun={(id) => console.log("Selected run:", id)}
+                    />
                 </div>
 
                 <div className="text-xs font-bold text-white/40 uppercase tracking-widest mt-2">Workspace</div>

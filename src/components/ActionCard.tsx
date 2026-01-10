@@ -16,6 +16,8 @@ const icons = {
     build_status: Terminal,
     security_gate: AlertCircle,
     code: Terminal,
+    analysis: Activity,
+    result: CheckCircle,
 };
 
 // HSL vars from globals.css
@@ -29,6 +31,8 @@ const typeColors: Record<ActionType, string> = {
     build_status: 'var(--emerald)',
     security_gate: 'var(--amber)',
     code: 'var(--sapphire)',
+    analysis: 'var(--amethyst)',
+    result: 'var(--emerald)',
 };
 
 export function ActionCard({ type, title, content, timestamp, agentId, severity }: ActionCardProps) {
