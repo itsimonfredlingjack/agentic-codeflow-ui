@@ -7,12 +7,25 @@ import { AgentWorkspace } from './AgentWorkspace';
 import { ActionCardProps } from '@/types';
 import { LayoutGrid, Cpu, Shield, Zap, Activity, PanelLeft, Settings, ChevronsRight } from 'lucide-react';
 import clsx from 'clsx';
-import { motion, AnimatePresence } from 'framer-motion';
 import { missionControlMachine } from '@/machines/missionControlMachine';
-import { RunList } from './RunList';
+
 import { SettingsModal } from './SettingsModal';
 import { CommandPalette } from './CommandPalette';
 import { LogicVisualizer } from './LogicVisualizer';
+import { AgentSelector } from './AgentSelector';
+import { ProjectTodos } from './ProjectTodos';
+import { StatusBar } from './StatusBar';
+
+// Define explicit types to avoid 'any'
+interface MissionSnapshot {
+    value: string | Record<string, string>;
+    context: {
+        runId: string;
+        agentId: string | null;
+        error: string | null;
+    };
+    matches: (stateValue: string | Record<string, unknown>) => boolean;
+}
 
 const phases = [
     { id: 'plan', label: 'PLAN', color: 'var(--sapphire)', icon: LayoutGrid },
@@ -30,7 +43,7 @@ const PHASE_MAP: Record<string, 'plan' | 'build' | 'review' | 'deploy'> = {
 };
 
 export function MissionControl() {
-    const [initialSnapshot, setInitialSnapshot] = useState<any>(null);
+    const [initialSnapshot, setInitialSnapshot] = useState<MissionSnapshot | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
@@ -65,15 +78,18 @@ export function MissionControl() {
     return <MissionControlInner initialSnapshot={initialSnapshot} />;
 }
 
-function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
+function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSnapshot | null }) {
+    // Note: Internal usage guarded by strict types now.
     const [snapshot, send] = useMachine(missionControlMachine, {
-        snapshot: initialSnapshot
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        snapshot: initialSnapshot as any // XState hydration cast if structure differs strictly
     });
     const [actions, setActions] = useState<ActionCardProps[]>([]);
     const [leftPanelOpen, setLeftPanelOpen] = useState(true);
     const [rightPanelOpen, setRightPanelOpen] = useState(true);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState(false);
+    const [activeAgentId, setActiveAgentId] = useState('architect');
 
     // Command Palette Logic
     useEffect(() => {
@@ -108,7 +124,6 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
     };
 
     const currentPhase = (Object.keys(PHASE_MAP).find(key => matchesPhase(key)) || 'plan') as 'plan' | 'build' | 'review' | 'deploy';
-    const isLocked = matchesPhase('review') && snapshot.matches({ review: 'locked' });
     const isLockdown = snapshot.matches('security_lockdown');
 
     // Persistence Loop: Save Snapshot on Change
@@ -211,10 +226,11 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
                 content = safeCommands[Math.floor(Math.random() * safeCommands.length)];
             }
 
-            const newAction: ActionCardProps & { payload?: any } = {
+
+            const newAction: ActionCardProps & { payload?: Record<string, unknown> } = {
                 id: Math.random().toString(),
                 runId: snapshot.context.runId,
-                type: type as any,
+                type: type as ActionCardProps['type'],
                 title: title,
                 content: content,
                 timestamp: new Date().toLocaleTimeString(),
@@ -242,30 +258,44 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
     };
 
     return (
-        <div className="grid h-screen w-full text-white overflow-hidden p-4 gap-4 transition-all duration-500 ease-in-out" style={{
+        <div className="grid h-screen w-full text-white overflow-hidden p-4 pb-0 gap-4 transition-all duration-500 ease-in-out" style={{
             gridTemplateColumns: `${leftPanelOpen ? '260px' : '0px'} minmax(400px, 1fr) ${rightPanelOpen ? '340px' : '0px'}`,
-            gridTemplateRows: 'auto 1fr',
-            ['--active-aura' as any]: phases.find(p => p.id === currentPhase)?.color
+            gridTemplateRows: 'auto 1fr auto',
+            ...({ '--active-aura': phases.find(p => p.id === currentPhase)?.color } as React.CSSProperties)
         }}>
 
             {/* SECURITY OVERLAY */}
-            {isLockdown && (
-                <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-8">
-                    <div className="bg-red-950/40 border border-red-500/50 rounded-2xl p-8 max-w-lg w-full text-center shadow-[0_0_100px_rgba(255,0,0,0.2)]">
-                        <Shield className="w-16 h-16 text-red-500 mx-auto mb-4 animate-pulse" />
-                        <h2 className="text-3xl font-bold text-white mb-2 tracking-widest">SECURITY LOCKDOWN</h2>
-                        <p className="text-red-200/80 mb-6 font-mono text-sm border-t border-b border-white/10 py-4 my-4">
-                            {snapshot.context.error}
-                        </p>
-                        <button
-                            onClick={() => send({ type: 'RETRY' })}
-                            className="bg-red-600 hover:bg-red-500 text-white font-bold py-3 px-8 rounded-lg transition-all shadow-lg hover:shadow-red-500/20"
-                        >
-                            ACKNOWLEDGE & RESET
-                        </button>
+            {
+                isLockdown && (
+                    <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-8">
+                        <div className="bg-red-950/40 border border-red-500/50 rounded-2xl p-8 max-w-lg w-full text-center shadow-[0_0_100px_rgba(255,0,0,0.2)]">
+                            <Shield className="w-16 h-16 text-red-500 mx-auto mb-4 animate-pulse" />
+                            <h2 className="text-3xl font-bold text-white mb-2 tracking-widest">SECURITY LOCKDOWN</h2>
+                            <p className="text-red-200/80 mb-6 font-mono text-sm border-t border-b border-white/10 py-4 my-4">
+                                {snapshot.context.error}
+                            </p>
+                            <button
+                                onClick={() => send({ type: 'RETRY' })}
+                                className="bg-red-600 hover:bg-red-500 text-white font-bold py-3 px-8 rounded-lg transition-all shadow-lg hover:shadow-red-500/20"
+                            >
+                                ACKNOWLEDGE & RESET
+                            </button>
+                        </div>
                     </div>
-                </div>
-            )}
+                )
+            }
+
+            {/* MODALS */}
+            <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+            <CommandPalette
+                isOpen={isCmdPaletteOpen}
+                onClose={() => setIsCmdPaletteOpen(false)}
+                actions={[
+                    { id: 'toggle-left', label: 'Toggle Sidebar', shortcut: 'Cmd+B', icon: PanelLeft, onSelect: () => handleCommand('toggle-left') },
+                    { id: 'new-run', label: 'New Session', shortcut: 'Cmd+R', icon: Zap, onSelect: () => handleCommand('new-run') },
+                    { id: 'open-settings', label: 'Settings', shortcut: 'Cmd+,', icon: Settings, onSelect: () => handleCommand('open-settings') }
+                ]}
+            />
 
             {/* 1. Header Board (HUD Style) */}
             <header className="col-span-3 flex items-center justify-between px-6 z-50 relative h-16">
@@ -282,35 +312,41 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
                     >
                         <Settings size={18} />
                     </button>
-                    <div className="h-6 w-[1px] bg-white/10" />
-                    <div className="text-xl font-bold tracking-widest text-white/90 glow-text">AGENCY<span className="text-white/40">OS</span></div>
-                    <div className="h-6 w-[1px] bg-white/10" />
+                    <div className="h-6 w-px bg-white/10" />
+                    <div className="text-xl font-bold tracking-widest text-white/90 glow-text">Agentic<span className="text-white/40">Code</span></div>
+                    <div className="h-6 w-px bg-white/10" />
                     <div className="text-xs font-mono text-white/50">PROJECT: GLASS PIPELINE</div>
                 </div>
 
                 {/* Minimalist Phase HUD */}
-                <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-8">
-                    {phases.map((phase, i) => {
-                        const isActive = currentPhase === phase.id;
-                        return (
-                            <div key={phase.id} className="flex items-center gap-2 relative group cursor-pointer" onClick={() => send({ type: 'SET_STAGE', stage: phase.id as any })}>
-                                {i > 0 && <ChevronsRight size={12} className="text-white/10 absolute -left-5" />}
-                                <div className={clsx(
-                                    "text-xs font-mono transition-all duration-300",
-                                    isActive ? "text-[var(--active-aura)] font-bold glow-text scale-110" : "text-white/20 group-hover:text-white/50"
-                                )}>
-                                    {phase.label}
+                <div className="absolute left-1/2 -translate-x-1/2 flex items-center justify-center w-[400px]">
+                    {/* THE RAIL SYSTEM */}
+                    <div className="absolute h-px w-full bg-white/5 z-0" />
+
+                    <div className="flex items-center gap-10 relative z-10">
+                        {phases.map((phase, i) => {
+                            const isActive = currentPhase === phase.id;
+                            return (
+                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                <div key={phase.id} className="flex items-center gap-2 relative group cursor-pointer bg-[hsl(var(--background))] px-2 z-10 transition-colors" onClick={() => send({ type: 'SET_STAGE', stage: phase.id } as any)}>
+                                    {i > 0 && <ChevronsRight size={12} className="text-white/10 absolute -left-5" />}
+                                    <div className={clsx(
+                                        "text-sm font-mono transition-all duration-300",
+                                        isActive ? "text-(--active-aura) font-bold glow-text scale-110" : "text-white/20 group-hover:text-white/50"
+                                    )}>
+                                        {phase.label}
+                                    </div>
+                                    {isActive && (
+                                        <div className="absolute -bottom-2 left-0 right-0 h-px bg-(--active-aura) shadow-[0_0_10px_var(--active-aura)]" />
+                                    )}
                                 </div>
-                                {isActive && (
-                                    <div className="absolute -bottom-2 left-0 right-0 h-[1px] bg-[var(--active-aura)] shadow-[0_0_10px_var(--active-aura)]" />
-                                )}
-                            </div>
-                        )
-                    })}
+                            )
+                        })}
+                    </div>
                 </div>
 
                 <div className="flex items-center gap-3">
-                    <div className="h-6 w-[1px] bg-white/10" />
+                    <div className="h-6 w-px bg-white/10" />
                     <button
                         onClick={() => setRightPanelOpen(!rightPanelOpen)}
                         className={clsx("p-2 rounded hover:bg-white/10 text-white/40 hover:text-white transition-colors", !rightPanelOpen && "bg-white/5 text-amber-400")}
@@ -326,7 +362,7 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
 
             {/* 2. Context Panel (Left) - Glassy */}
             <aside className="glass-panel p-4 rounded-xl flex flex-col gap-4 relative">
-                <div className="flex-1 overflow-hidden flex flex-col gap-4">
+                <div className="flex-3 overflow-y-auto pr-1 flex flex-col gap-4 custom-scrollbar">
                     {/* Active Run Card */}
                     <div className="flex flex-col gap-2 border-b border-white/5 pb-4">
                         <div className="flex items-center justify-between">
@@ -343,23 +379,24 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
                         <div className="font-mono text-sm text-emerald-400">#{snapshot.context.runId}</div>
                         <div className="text-[10px] text-white/50">Started 14:02:45</div>
                     </div>
-
-                    {/* Run List */}
-                    <RunList
-                        currentRunId={`run-${snapshot.context.runId}`}
-                        onSelectRun={(id) => console.log("Selected run:", id)}
+                    {/* Agent Selection Section */}
+                    <AgentSelector
+                        currentAgentId={activeAgentId}
+                        onSelectAgent={setActiveAgentId}
                     />
+
+                    {/* Project Tasks */}
+                    <ProjectTodos />
                 </div>
 
-                <div className="text-xs font-bold text-white/40 uppercase tracking-widest mt-2">Workspace</div>
-                <div className="flex-1 bg-black/20 rounded border border-white/5 p-3 overflow-hidden font-mono">
-                    <div className="opacity-50 text-xs space-y-2">
-                        <div>📁 src/</div>
-                        <div className="pl-4 text-emerald-400/80">📄 MissionControl.tsx</div>
-                        <div className="pl-4">📄 ShadowTerminal.tsx</div>
-                        <div className="pl-4">📄 ActionCard.tsx</div>
-                        <div className="pl-4">📄 globals.css</div>
-                    </div>
+                <div className="flex flex-col gap-2 pt-4 border-t border-white/5">
+                    <button className="flex items-center justify-between p-3 rounded-lg hover:bg-white/5 transition-all text-white/40 hover:text-white group">
+                        <div className="flex items-center gap-3">
+                            <Activity size={16} className="group-hover:text-amber-400 transition-colors" />
+                            <span className="text-xs font-bold uppercase tracking-widest">Recent Sessions</span>
+                        </div>
+                        <ChevronsRight size={14} className="opacity-0 group-hover:opacity-100 transition-all translate-x-[-4px] group-hover:translate-x-0" />
+                    </button>
                 </div>
             </aside>
 
@@ -369,7 +406,7 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
                 {/* Unified Agent Workspace */}
                 <AgentWorkspace
                     currentPhase={currentPhase}
-                    stream={actions as any} // In real app, map this properly
+                    stream={actions} // Types match ActionCardProps
                     onSendMessage={(msg) => {
                         // Optimistic update
                         const userMsg = {
@@ -391,8 +428,9 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
 
             {/* 4. Insight Panel (Right) - Glassy */}
             <aside className="glass-panel p-5 rounded-xl flex flex-col relative overflow-hidden gap-4">
-                <LogicVisualizer currentPhase={currentPhase} onTransition={(event) => send({ type: event as any })} />
-                <div className="h-[1px] bg-white/5 w-full my-2" />
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                <LogicVisualizer currentPhase={currentPhase} onTransition={(event) => send({ type: event } as any)} />
+                <div className="h-px bg-white/5 w-full my-2" />
                 <div className="text-xs font-bold text-white/40 uppercase tracking-wider">System Status</div>
 
                 {/* Memory Usage / Context Window */}
@@ -449,6 +487,14 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
                 </div>
             </aside>
 
+            {/* Status Bar (Claude Code Style) */}
+            <div className="col-span-3">
+                <StatusBar
+                    currentPhase={currentPhase}
+                    eventCount={actions.length}
+                    isProcessing={false}
+                />
+            </div>
         </div>
     );
 }

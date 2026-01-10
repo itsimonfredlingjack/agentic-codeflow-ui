@@ -2,16 +2,25 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Command, LayoutGrid, Zap, Shield, Grid, PanelLeft, PanelRight, Terminal, X, Settings } from 'lucide-react';
+import { Search, Zap, PanelLeft, PanelRight, Terminal, X, Settings } from 'lucide-react';
 import clsx from 'clsx';
+
+interface CommandAction {
+    id: string;
+    label: string;
+    icon: React.ElementType;
+    shortcut?: string;
+    onSelect?: () => void;
+}
 
 interface CommandPaletteProps {
     isOpen: boolean;
     onClose: () => void;
-    onCommand: (commandId: string) => void;
+    onCommand?: (commandId: string) => void;
+    actions?: CommandAction[];
 }
 
-const COMMANDS = [
+const DEFAULT_COMMANDS: CommandAction[] = [
     { id: 'toggle-left', label: 'Toggle Left Panel', icon: PanelLeft, shortcut: 'Cmd+B' },
     { id: 'toggle-right', label: 'Toggle Right Panel', icon: PanelRight, shortcut: 'Cmd+.' },
     { id: 'new-run', label: 'Start New Session', icon: Zap, shortcut: 'Cmd+N' },
@@ -20,11 +29,16 @@ const COMMANDS = [
     { id: 'focus-input', label: 'Focus Omnibar', icon: Terminal, shortcut: '/' },
 ];
 
-export function CommandPalette({ isOpen, onClose, onCommand }: CommandPaletteProps) {
+export function CommandPalette({ isOpen, onClose, onCommand, actions = [] }: CommandPaletteProps) {
     const [query, setQuery] = useState('');
     const [selectedIndex, setSelectedIndex] = useState(0);
 
-    const filteredCommands = COMMANDS.filter(cmd =>
+    // Merge default and passed actions
+    const allCommands = [...actions, ...DEFAULT_COMMANDS];
+    // De-duplicate by ID (prefer passed actions)
+    const uniqueCommands = Array.from(new Map(allCommands.map(item => [item.id, item])).values());
+
+    const filteredCommands = uniqueCommands.filter(cmd =>
         cmd.label.toLowerCase().includes(query.toLowerCase())
     );
 
@@ -42,7 +56,12 @@ export function CommandPalette({ isOpen, onClose, onCommand }: CommandPalettePro
             } else if (e.key === 'Enter') {
                 e.preventDefault();
                 if (filteredCommands[selectedIndex]) {
-                    onCommand(filteredCommands[selectedIndex].id);
+                    const cmd = filteredCommands[selectedIndex];
+                    if (cmd.onSelect) {
+                        cmd.onSelect();
+                    } else if (onCommand) {
+                        onCommand(cmd.id);
+                    }
                     onClose();
                 }
             } else if (e.key === 'Escape') {
@@ -54,13 +73,13 @@ export function CommandPalette({ isOpen, onClose, onCommand }: CommandPalettePro
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [isOpen, filteredCommands, selectedIndex, onCommand, onClose]);
 
-    // Reset selection on query change
-    useEffect(() => setSelectedIndex(0), [query]);
+    // Reset selection on query change handled in onChange now
+    // useEffect(() => setSelectedIndex(0), [query]);
 
     return (
         <AnimatePresence>
             {isOpen && (
-                <div className="fixed inset-0 z-[1000] flex items-start justify-center pt-[20vh] px-4">
+                <div className="fixed inset-0 z-1000 flex items-start justify-center pt-[20vh] px-4">
                     {/* Backdrop */}
                     <motion.div
                         initial={{ opacity: 0 }}
@@ -75,7 +94,7 @@ export function CommandPalette({ isOpen, onClose, onCommand }: CommandPalettePro
                         initial={{ scale: 0.95, opacity: 0, y: -20 }}
                         animate={{ scale: 1, opacity: 1, y: 0 }}
                         exit={{ scale: 0.95, opacity: 0, y: -20 }}
-                        className="relative w-full max-w-xl bg-[#0a0a0a] border border-white/20 rounded-xl shadow-2xl overflow-hidden flex flex-col"
+                        className="relative w-full max-w-xl bg-[hsl(var(--background))] border border-white/20 rounded-xl shadow-2xl overflow-hidden flex flex-col"
                     >
                         {/* Search Input */}
                         <div className="flex items-center px-4 py-4 border-b border-white/10 gap-3">
@@ -83,7 +102,10 @@ export function CommandPalette({ isOpen, onClose, onCommand }: CommandPalettePro
                             <input
                                 autoFocus
                                 value={query}
-                                onChange={(e) => setQuery(e.target.value)}
+                                onChange={(e) => {
+                                    setQuery(e.target.value);
+                                    setSelectedIndex(0);
+                                }}
                                 placeholder="Type a command or search..."
                                 className="bg-transparent border-none outline-none text-white text-lg placeholder-white/20 flex-1"
                             />
@@ -96,7 +118,11 @@ export function CommandPalette({ isOpen, onClose, onCommand }: CommandPalettePro
                                 filteredCommands.map((cmd, index) => (
                                     <button
                                         key={cmd.id}
-                                        onClick={() => { onCommand(cmd.id); onClose(); }}
+                                        onClick={() => {
+                                            if (cmd.onSelect) cmd.onSelect();
+                                            else if (onCommand) onCommand(cmd.id);
+                                            onClose();
+                                        }}
                                         onMouseEnter={() => setSelectedIndex(index)}
                                         className={clsx(
                                             "w-full flex items-center justify-between px-4 py-3 transition-colors",

@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Check, Server, Key, Cpu, Wifi } from 'lucide-react';
+import { X, Server, Key, Cpu, Wifi } from 'lucide-react';
 import clsx from 'clsx';
 
 interface SettingsModalProps {
@@ -28,7 +28,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     return (
         <AnimatePresence>
             {isOpen && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                <div className="fixed inset-0 z-100 flex items-center justify-center p-4">
                     {/* Backdrop */}
                     <motion.div
                         initial={{ opacity: 0 }}
@@ -43,7 +43,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         initial={{ scale: 0.95, opacity: 0, y: 10 }}
                         animate={{ scale: 1, opacity: 1, y: 0 }}
                         exit={{ scale: 0.95, opacity: 0, y: 10 }}
-                        className="relative w-full max-w-2xl bg-[#0a0a0a] border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[500px]"
+                        className="relative w-full max-w-2xl bg-[hsl(var(--background))] border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[500px]"
                     >
                         {/* Header */}
                         <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-white/5">
@@ -55,7 +55,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
                         <div className="flex flex-1 overflow-hidden">
                             {/* Sidebar Tabs */}
-                            <div className="w-48 bg-white/[0.02] border-r border-white/5 p-4 flex flex-col gap-1">
+                            <div className="w-48 bg-white/2 border-r border-white/5 p-4 flex flex-col gap-1">
                                 {[
                                     { id: 'providers', label: 'Providers', icon: Server },
                                     { id: 'models', label: 'Models', icon: Cpu },
@@ -63,7 +63,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                 ].map((tab) => (
                                     <button
                                         key={tab.id}
-                                        onClick={() => setActiveTab(tab.id as any)}
+                                        onClick={() => setActiveTab(tab.id as 'providers' | 'models' | 'system')}
                                         className={clsx(
                                             "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left",
                                             activeTab === tab.id

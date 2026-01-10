@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
-import { ChevronRight, Lock, Unlock } from 'lucide-react';
+import { ChevronRight, Unlock } from 'lucide-react';
 import clsx from 'clsx';
 
 interface ReviewGateProps {
@@ -13,7 +13,6 @@ export function ReviewGate({ onUnlock }: ReviewGateProps) {
     const [unlocked, setUnlocked] = useState(false);
     const [showDeployButton, setShowDeployButton] = useState(false);
     const x = useMotionValue(0);
-    const opacity = useTransform(x, [0, 200], [1, 0]);
     const textOpacity = useTransform(x, [0, 100], [1, 0]);
     const width = 260; // Track width
 
@@ -32,7 +31,7 @@ export function ReviewGate({ onUnlock }: ReviewGateProps) {
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 onClick={onUnlock}
-                className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 h-14 rounded-xl flex items-center justify-center gap-2 font-bold tracking-widest text-white shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/40 transition-all active:scale-95"
+                className="w-full bg-linear-to-r from-emerald-500 to-emerald-600 h-14 rounded-xl flex items-center justify-center gap-2 font-bold tracking-widest text-white shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/40 transition-all active:scale-95"
             >
                 <Unlock size={18} />
                 DEPLOY NOW

@@ -70,8 +70,8 @@ body::before {
 
 /* Utilities */
 .glass-panel {
-  background-color: hsla(220, 20%, 8%, 0.8);
-  /* Neutral Obsidian */
+  background-color: hsla(220, 20%, 4%, 0.95);
+  /* Match --background with slight transparency */
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.08);

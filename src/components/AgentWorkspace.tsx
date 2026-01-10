@@ -1,20 +1,22 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, CornerDownLeft, Sparkles, Terminal, FileCode, CheckCircle, ShieldAlert, ChevronRight } from 'lucide-react';
+import { Send, Sparkles, Terminal, CheckCircle, ShieldAlert, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 import { ActionCardProps } from '@/types';
 import { BlueprintCard, BuildStatusCard, SecurityGateCard } from './SemanticCards';
 import { CodeBlockCard } from './CodeBlockCard';
 import { AIAvatar } from './AIAvatar';
+import { PhaseAura } from './PhaseAura';
+import { AgentControls } from './AgentControls';
 
 // Extend base types for hybrid stream
 export interface StreamItem extends ActionCardProps {
     isUser?: boolean;
     isTyping?: boolean;
     // Enhancement: Strict payload types for cards
-    payload?: any;
+    payload?: Record<string, unknown>;
 }
 
 interface AgentWorkspaceProps {
@@ -77,16 +79,18 @@ export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWor
     const RoleIcon = config.icon;
 
     return (
-        <div className="flex flex-col h-full relative overflow-hidden bg-[#050505] border border-white/10 rounded-xl group shadow-2xl font-mono">
+        <div className="flex flex-col h-full relative overflow-hidden bg-[hsl(var(--background))] rounded-xl group shadow-inner shadow-black/80 font-mono">
+            {/* Phase Aura Background */}
+            <PhaseAura phase={currentPhase} />
 
             {/* Header / HUD */}
-            <div className="h-14 border-b border-white/10 flex items-center px-6 justify-between bg-[#050505] z-10 shrink-0">
+            <div className="h-14 border-b border-white/5 flex items-center px-6 justify-between bg-black/20 z-10 shrink-0">
                 <div className="flex items-center gap-4">
                     <div className="relative scale-75 origin-left">
                         <AIAvatar phase={currentPhase} isProcessing={stream.some(s => s.isTyping)} />
                     </div>
                     <div className="flex flex-col">
-                         <div className={clsx("text-sm font-bold tracking-widest flex items-center gap-2", config.accent)}>
+                        <div className={clsx("text-sm font-bold tracking-widest flex items-center gap-2", config.accent)}>
                             <RoleIcon size={14} />
                             <span style={{ textShadow: '0 0 10px currentColor' }}>AI_{config.label}</span>
                         </div>
@@ -107,7 +111,7 @@ export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWor
                 ref={scrollRef}
             >
                 {/* Timeline Line */}
-                <div className="absolute left-8 top-0 bottom-0 w-[1px] bg-white/10" />
+                <div className="absolute left-8 top-0 bottom-0 w-px bg-white/10" />
 
                 <div className="space-y-8 pl-8">
                     <AnimatePresence initial={false}>
@@ -152,14 +156,14 @@ export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWor
                                             ) : item.type === 'build_status' ? (
                                                 <BuildStatusCard
                                                     title={item.title}
-                                                    progress={item.payload?.progress || 0}
+                                                    progress={(item.payload?.progress as number) || 0}
                                                 />
                                             ) : item.type === 'code' ? (
                                                 <CodeBlockCard code={item.content} language="typescript" />
                                             ) : item.type === 'security_gate' ? (
                                                 <SecurityGateCard
-                                                    policy={item.payload?.policy || "Standard Policy"}
-                                                    status={item.payload?.status || 'warn'}
+                                                    policy={(item.payload?.policy as string) || "Standard Policy"}
+                                                    status={(item.payload?.status as 'pass' | 'warn' | 'fail') || 'warn'}
                                                 />
                                             ) : item.type === 'command' ? (
                                                 <div className="font-mono text-xs text-emerald-400/90 flex items-center gap-2">
@@ -204,6 +208,9 @@ export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWor
 
                 <div ref={bottomRef} className="h-4" />
             </div>
+
+            {/* Elite HUD Enhancements */}
+            <AgentControls phase={currentPhase} />
 
             {/* Omnibar Input */}
             <div className="p-4 shrink-0 z-20 bg-[#050505] border-t border-white/10">

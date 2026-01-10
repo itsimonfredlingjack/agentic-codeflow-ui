@@ -14,7 +14,7 @@ export interface AgentEvent {
 
     // Standardized Fields
     source?: string; // e.g. "Architect", "Builder"
-    payload?: any;   // Flexible payload for richer events
+    payload?: Record<string, unknown>;   // Flexible payload for richer events
 
     // Refinement: Severity for filtering
     severity: 'info' | 'warn' | 'error';
@@ -27,4 +27,4 @@ export interface AgentEvent {
 }
 
 // For UI compatibility
-export interface ActionCardProps extends AgentEvent { }
+export type ActionCardProps = AgentEvent;
