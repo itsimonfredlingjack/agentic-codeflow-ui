@@ -95,24 +95,8 @@ body::before {
   box-shadow: 0 0 20px rgba(var(--active-aura), 0.1);
 }
 
-.chat-bubble-ai {
-  background: linear-gradient(135deg, hsla(var(--sapphire), 0.1) 0%, hsla(var(--amethyst), 0.1) 100%);
-  border: 1px solid hsla(var(--sapphire), 0.2);
-  border-bottom-left-radius: 4px;
-}
-
-.chat-bubble-user {
-  background: hsla(var(--foreground), 0.05);
-  border: 1px solid hsla(var(--foreground), 0.1);
-  border-bottom-right-radius: 4px;
-}
-
-.glow-input:focus-within {
-  box-shadow: 0 0 0 1px hsla(var(--sapphire), 0.5), 0 0 15px hsla(var(--sapphire), 0.2);
-}
-
-.text-shadow {
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+.glow-text {
+  text-shadow: 0 0 10px currentColor;
 }
 
 .flex-center {
@@ -155,35 +139,8 @@ body::before {
 /* --- Agent Workspace (Glass Console) --- */
 
 .console-stream {
-  mask-image: linear-gradient(to bottom, transparent, black 5%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent, black 5%);
-}
-
-.message-node {
-  position: relative;
-  padding-left: 24px;
-}
-
-.message-node::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: hsla(var(--active-aura), 0.3);
-  border-radius: 2px;
-}
-
-.message-user {
-  background: linear-gradient(90deg, hsla(var(--foreground), 0.03) 0%, transparent 100%);
-  border-left: 2px solid hsla(var(--foreground), 0.2);
-}
-
-.message-ai {
-  background: linear-gradient(90deg, hsla(var(--active-aura), 0.1) 0%, transparent 100%);
-  border-left: 2px solid hsla(var(--active-aura), 0.8);
-  box-shadow: 0 4px 12px hsla(var(--active-aura), 0.05);
+  mask-image: linear-gradient(to bottom, transparent, black 2%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 2%);
 }
 
 /* Typing Indicator Pulse */

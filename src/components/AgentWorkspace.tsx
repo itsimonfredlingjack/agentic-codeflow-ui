@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, CornerDownLeft, Sparkles, Terminal, FileCode, CheckCircle, ShieldAlert } from 'lucide-react';
+import { Send, CornerDownLeft, Sparkles, Terminal, FileCode, CheckCircle, ShieldAlert, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 import { ActionCardProps } from '@/types';
@@ -47,28 +47,28 @@ export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWor
                 label: 'ARCHITECT',
                 placeholder: 'Describe your vision or ask for blueprint changes...',
                 accent: 'text-[var(--sapphire)]',
-                bg: 'bg-[var(--sapphire)]'
+                border: 'border-[var(--sapphire)]'
             };
             case 'build': return {
                 icon: Terminal,
                 label: 'ENGINEER',
                 placeholder: 'Enter build command or debugging query...',
                 accent: 'text-[var(--emerald)]',
-                bg: 'bg-[var(--emerald)]'
+                border: 'border-[var(--emerald)]'
             };
             case 'review': return {
                 icon: ShieldAlert,
                 label: 'CRITIC',
                 placeholder: 'Ask about security risks or approve changes...',
                 accent: 'text-[var(--amber)]',
-                bg: 'bg-[var(--amber)]'
+                border: 'border-[var(--amber)]'
             };
             default: return {
                 icon: CheckCircle,
                 label: 'DEPLOYER',
                 placeholder: 'Command deployment...',
                 accent: 'text-[var(--amethyst)]',
-                bg: 'bg-[var(--amethyst)]'
+                border: 'border-[var(--amethyst)]'
             };
         }
     };
@@ -77,128 +77,143 @@ export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWor
     const RoleIcon = config.icon;
 
     return (
-        <div className="flex flex-col h-full relative overflow-hidden bg-[#0a0a0a]/80 backdrop-blur-3xl border border-white/10 rounded-xl group shadow-2xl">
+        <div className="flex flex-col h-full relative overflow-hidden bg-[#050505] border border-white/10 rounded-xl group shadow-2xl font-mono">
 
-            {/* Header / StatusBar */}
-            <div className="h-12 border-b border-white/10 flex items-center px-4 justify-between bg-black/20 backdrop-blur-md z-10 shrink-0">
-                <div className="flex items-center gap-3">
-                    <div className="relative">
+            {/* Header / HUD */}
+            <div className="h-14 border-b border-white/10 flex items-center px-6 justify-between bg-[#050505] z-10 shrink-0">
+                <div className="flex items-center gap-4">
+                    <div className="relative scale-75 origin-left">
                         <AIAvatar phase={currentPhase} isProcessing={stream.some(s => s.isTyping)} />
                     </div>
-                    <div>
-                        <div className={clsx("text-xs font-bold tracking-widest", config.accent)}>
-                            AI {config.label}
+                    <div className="flex flex-col">
+                         <div className={clsx("text-sm font-bold tracking-widest flex items-center gap-2", config.accent)}>
+                            <RoleIcon size={14} />
+                            <span style={{ textShadow: '0 0 10px currentColor' }}>AI_{config.label}</span>
                         </div>
-                        <div className="text-[10px] text-white/40 font-mono">
-                            SESSION ACTIVE • {stream.length} EVENTS
+                        <div className="text-[10px] text-white/40 tracking-wider">
+                            SESSION ID: <span className="text-white/60">0x1A4F</span> • EVENTS: {stream.length}
                         </div>
                     </div>
                 </div>
+                <div className="flex items-center gap-2 text-[10px] text-white/20">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    SYSTEM ONLINE
+                </div>
             </div>
 
-            {/* Stream Area */}
+            {/* Stream Area - Vertical Timeline */}
             <div
-                className="flex-1 overflow-y-auto p-6 space-y-6 console-stream scroll-smooth"
+                className="flex-1 overflow-y-auto p-6 console-stream scroll-smooth relative"
                 ref={scrollRef}
             >
-                <AnimatePresence initial={false}>
-                    {stream.map((item) => (
-                        <motion.div
-                            key={item.id}
-                            initial={{ opacity: 0, x: -10 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            className={clsx(
-                                "w-full", // Full width container
-                                item.isUser ? "ml-auto max-w-xl" : "mr-auto",
-                                // Only constrain width for non-code items if needed, but flex-col handles it
-                                item.type !== 'code' && !item.isUser && "max-w-3xl"
-                            )}
-                        >
-                            {item.isUser ? (
-                                // User Message
-                                <div className="flex flex-col items-end gap-1">
-                                    <div className="text-[10px] text-white/30 uppercase tracking-wider font-bold pr-1">You</div>
-                                    <div className="message-user px-4 py-3 rounded-tr-none rounded-2xl text-white/90 text-sm leading-relaxed backdrop-blur-md shadow-sm max-w-xl">
-                                        {item.content}
-                                    </div>
-                                </div>
-                            ) : (
-                                // AI Message / Event
-                                <div className="message-node flex flex-col gap-2">
-                                    <div className="flex items-center gap-2">
-                                        <span className={clsx("text-xs font-bold uppercase", config.accent)}>
-                                            {item.agentId || 'SYSTEM'}
-                                        </span>
-                                        <span className="text-[10px] text-white/20 font-mono">{item.timestamp}</span>
-                                    </div>
+                {/* Timeline Line */}
+                <div className="absolute left-8 top-0 bottom-0 w-[1px] bg-white/10" />
 
-                                    {/* Content based on type */}
-                                    {item.type === 'plan_artifact' ? (
-                                        <BlueprintCard content={item.content} />
-                                    ) : item.type === 'build_status' ? (
-                                        <BuildStatusCard
-                                            title={item.title}
-                                            progress={item.payload?.progress || 0}
-                                        />
-                                    ) : item.type === 'code' ? (
-                                        <CodeBlockCard code={item.content} language="typescript" />
-                                    ) : item.type === 'security_gate' ? (
-                                        <SecurityGateCard
-                                            policy={item.payload?.policy || "Standard Policy"}
-                                            status={item.payload?.status || 'warn'}
-                                        />
-                                    ) : item.type === 'command' ? (
-                                        <div className="font-mono text-xs bg-black/40 border border-white/10 rounded p-3 text-emerald-400/90 shadow-inner">
-                                            $ {item.content}
+                <div className="space-y-8 pl-8">
+                    <AnimatePresence initial={false}>
+                        {stream.map((item) => (
+                            <motion.div
+                                key={item.id}
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="w-full relative"
+                            >
+                                {/* Timeline Node Indicator */}
+                                <div className={clsx(
+                                    "absolute -left-[37px] top-1 w-2.5 h-2.5 rounded-full border-2 bg-[#050505]",
+                                    item.isUser ? "border-white/40" : config.border
+                                )} />
+
+                                {item.isUser ? (
+                                    // User Entry
+                                    <div className="flex flex-col gap-1">
+                                        <div className="flex items-center gap-2 text-xs text-white/40">
+                                            <span className="font-bold text-white/60">USER</span>
+                                            <ChevronRight size={10} />
+                                            <span className="font-mono">{item.timestamp}</span>
                                         </div>
-                                    ) : item.type === 'error' ? (
-                                        <div className="bg-red-500/10 border border-red-500/20 rounded p-3 text-red-300 text-sm flex items-start gap-3">
-                                            <ShieldAlert size={16} className="shrink-0 mt-0.5" />
-                                            <div>
-                                                <div className="font-bold text-xs uppercase mb-1 opacity-70">Error</div>
-                                                {item.content}
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className={clsx(
-                                            "message-ai px-5 py-4 rounded-tl-none rounded-2xl text-white/90 text-sm leading-relaxed",
-                                        )}>
-                                            {item.title && <div className="font-bold mb-2 text-white/90 flex items-center gap-2">
-                                                {item.phase === 'build' && <Terminal size={12} />}
-                                                {item.title}
-                                            </div>}
+                                        <div className="text-white/90 text-sm leading-relaxed whitespace-pre-wrap font-sans pl-2 border-l-2 border-white/10 py-1">
                                             {item.content}
                                         </div>
-                                    )}
-                                </div>
-                            )}
-                        </motion.div>
-                    ))}
-                </AnimatePresence>
+                                    </div>
+                                ) : (
+                                    // AI Entry
+                                    <div className="flex flex-col gap-2">
+                                        <div className="flex items-center gap-2 text-xs text-white/40">
+                                            <span className={clsx("font-bold", config.accent)}>{item.agentId || 'SYSTEM'}</span>
+                                            <span className="px-1 py-0.5 rounded border border-white/10 text-[9px] uppercase">{item.phase}</span>
+                                            <span className="font-mono">{item.timestamp}</span>
+                                        </div>
 
-                {/* Typing Indicator */}
-                {stream.some(s => s.isTyping) && (
-                    <div className="message-node pt-2">
-                        <div className="flex gap-1.5 p-2 items-center">
-                            <div className="w-1.5 h-1.5 rounded-full typing-dot" />
-                            <div className="w-1.5 h-1.5 rounded-full typing-dot" />
-                            <div className="w-1.5 h-1.5 rounded-full typing-dot" />
+                                        {/* Content based on type */}
+                                        <div className="pl-0">
+                                            {item.type === 'plan_artifact' ? (
+                                                <BlueprintCard content={item.content} />
+                                            ) : item.type === 'build_status' ? (
+                                                <BuildStatusCard
+                                                    title={item.title}
+                                                    progress={item.payload?.progress || 0}
+                                                />
+                                            ) : item.type === 'code' ? (
+                                                <CodeBlockCard code={item.content} language="typescript" />
+                                            ) : item.type === 'security_gate' ? (
+                                                <SecurityGateCard
+                                                    policy={item.payload?.policy || "Standard Policy"}
+                                                    status={item.payload?.status || 'warn'}
+                                                />
+                                            ) : item.type === 'command' ? (
+                                                <div className="font-mono text-xs text-emerald-400/90 flex items-center gap-2">
+                                                    <span className="text-white/40">$</span>
+                                                    {item.content}
+                                                </div>
+                                            ) : item.type === 'error' ? (
+                                                <div className="text-red-400 text-sm flex items-start gap-2 bg-red-950/10 border-l-2 border-red-500/50 p-2">
+                                                    <ShieldAlert size={14} className="shrink-0 mt-0.5" />
+                                                    {item.content}
+                                                </div>
+                                            ) : (
+                                                <div className="text-white/80 text-sm font-mono leading-relaxed">
+                                                    {item.title && (
+                                                        <div className="font-bold text-white/90 mb-1 flex items-center gap-2">
+                                                            {item.title}
+                                                        </div>
+                                                    )}
+                                                    {item.content}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </motion.div>
+                        ))}
+                    </AnimatePresence>
+
+                    {/* Typing Indicator */}
+                    {stream.some(s => s.isTyping) && (
+                        <div className="relative">
+                            <div className={clsx(
+                                "absolute -left-[37px] top-1 w-2.5 h-2.5 rounded-full border-2 bg-[#050505] animate-pulse",
+                                config.border
+                            )} />
+                            <div className="text-xs text-white/30 font-mono animate-pulse">
+                                AI_AGENT IS PROCESSING...
+                            </div>
                         </div>
-                    </div>
-                )}
+                    )}
+                </div>
 
                 <div ref={bottomRef} className="h-4" />
             </div>
 
             {/* Omnibar Input */}
-            <div className="omnibar-wrapper p-4 shrink-0 z-20">
+            <div className="p-4 shrink-0 z-20 bg-[#050505] border-t border-white/10">
                 <div className={clsx(
-                    "relative group rounded-xl bg-black/40 border transition-all duration-300 flex items-stretch overflow-hidden",
-                    "border-white/10 focus-within:border-[var(--active-aura)] focus-within:bg-black/60 focus-within:shadow-[0_0_20px_rgba(var(--active-aura),0.2)]"
+                    "relative group flex items-stretch overflow-hidden",
+                    // Removed background, just border and glowing text
                 )}>
                     {/* Prefix Icon */}
-                    <div className="w-10 flex items-center justify-center text-white/20 group-focus-within:text-[var(--active-aura)] transition-colors">
-                        {currentPhase === 'build' ? <span className="font-mono text-lg">❯</span> : <Sparkles size={16} />}
+                    <div className="w-8 flex items-start pt-3 justify-center text-white/30">
+                        <span className="font-mono text-lg">❯</span>
                     </div>
 
                     <textarea
@@ -211,8 +226,7 @@ export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWor
                             }
                         }}
                         placeholder={config.placeholder}
-                        className="omnibar-input flex-1 bg-transparent border-none focus:ring-0 text-white/90 placeholder:text-white/20 resize-none py-4 px-0 min-h-[56px] max-h-[200px] text-[15px] leading-relaxed"
-                        style={{ outline: "none" }} // Ensure no blue browser outline
+                        className="flex-1 bg-transparent border-none focus:ring-0 text-white/90 placeholder:text-white/20 resize-none py-3 px-0 min-h-[48px] max-h-[200px] text-sm font-mono leading-relaxed focus:outline-none"
                     />
 
                     <div className="flex flex-col justify-end p-2">
@@ -220,13 +234,13 @@ export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWor
                             onClick={handleSend}
                             disabled={!inputValue.trim()}
                             className={clsx(
-                                "p-2 rounded-lg transition-all",
+                                "p-2 rounded transition-all",
                                 inputValue.trim()
-                                    ? "text-white shadow-lg bg-[var(--active-aura)]"
-                                    : "text-white/10 hover:text-white/30"
+                                    ? config.accent
+                                    : "text-white/10"
                             )}
                         >
-                            {inputValue.trim() ? <Send size={16} /> : <CornerDownLeft size={16} />}
+                            {inputValue.trim() ? <Send size={14} /> : null}
                         </button>
                     </div>
                 </div>

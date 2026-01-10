@@ -5,7 +5,7 @@ import { useMachine } from '@xstate/react';
 import { ReviewGate } from './ReviewGate';
 import { AgentWorkspace } from './AgentWorkspace';
 import { ActionCardProps } from '@/types';
-import { LayoutGrid, Cpu, Shield, Zap, Activity, PanelLeft, Settings } from 'lucide-react';
+import { LayoutGrid, Cpu, Shield, Zap, Activity, PanelLeft, Settings, ChevronsRight } from 'lucide-react';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { missionControlMachine } from '@/machines/missionControlMachine';
@@ -267,8 +267,8 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
                 </div>
             )}
 
-            {/* 1. Header Board (Top) */}
-            <header className="col-span-3 glass-panel rounded-xl flex items-center justify-between px-6 z-50 bg-[#000000]/20 backdrop-blur-md relative h-20">
+            {/* 1. Header Board (HUD Style) */}
+            <header className="col-span-3 flex items-center justify-between px-6 z-50 relative h-16">
                 <div className="flex items-center gap-4">
                     <button
                         onClick={() => setLeftPanelOpen(!leftPanelOpen)}
@@ -283,57 +283,29 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
                         <Settings size={18} />
                     </button>
                     <div className="h-6 w-[1px] bg-white/10" />
-                    <div className="text-xl font-bold tracking-widest text-white/90">AGENCY<span className="text-white/40">OS</span></div>
+                    <div className="text-xl font-bold tracking-widest text-white/90 glow-text">AGENCY<span className="text-white/40">OS</span></div>
                     <div className="h-6 w-[1px] bg-white/10" />
                     <div className="text-xs font-mono text-white/50">PROJECT: GLASS PIPELINE</div>
                 </div>
 
-                {/* Phase Commander v2: ALL IN */}
-                <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-6 bg-black/40 backdrop-blur-xl border border-white/10 rounded-full px-6 py-4 shadow-[0_0_50px_rgba(0,0,0,0.8)] z-50">
-                    {/* Decorative inner ring */}
-                    <div className="absolute inset-1 rounded-full border border-white/5 pointer-events-none" />
-
-                    {phases.map((phase) => {
+                {/* Minimalist Phase HUD */}
+                <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-8">
+                    {phases.map((phase, i) => {
                         const isActive = currentPhase === phase.id;
-                        const Icon = phase.icon;
                         return (
-                            <button
-                                key={phase.id}
-                                onClick={() => send({ type: 'SET_STAGE', stage: phase.id as any })}
-                                className={clsx(
-                                    "relative px-10 py-5 rounded-full flex items-center justify-center gap-4 transition-all duration-500 group isolation-auto",
-                                    isActive ? "text-white scale-110 z-10" : "text-white/20 hover:text-white/50 hover:bg-white/5"
-                                )}
-                            >
-                                {isActive && (
-                                    <>
-                                        {/* Main Glow Spotlight */}
-                                        <motion.div
-                                            layoutId="activeSpotlight"
-                                            className="absolute inset-0 bg-[var(--active-aura)]/20 border border-[var(--active-aura)]/60 rounded-full shadow-[0_0_40px_rgba(var(--active-aura),0.5)]"
-                                            transition={{ type: "spring", bounce: 0.25, duration: 0.7 }}
-                                        />
-                                        {/* Inner "Core" Highlight */}
-                                        <motion.div
-                                            layoutId="activeCore"
-                                            className="absolute inset-2 bg-gradient-to-t from-[var(--active-aura)]/10 to-transparent rounded-full"
-                                            transition={{ duration: 0.5 }}
-                                        />
-                                    </>
-                                )}
-
-                                <span className="relative z-20">
-                                    <Icon size={24} strokeWidth={isActive ? 2.5 : 1.5} className={clsx(isActive && "drop-shadow-[0_0_8px_rgba(255,255,255,0.8)]")} />
-                                </span>
-
-                                <span className={clsx(
-                                    "relative z-20 text-xs font-bold tracking-[0.2em] uppercase transition-all duration-500",
-                                    isActive ? "opacity-100 translate-x-0 w-auto" : "opacity-0 -translate-x-4 w-0 overflow-hidden"
+                            <div key={phase.id} className="flex items-center gap-2 relative group cursor-pointer" onClick={() => send({ type: 'SET_STAGE', stage: phase.id as any })}>
+                                {i > 0 && <ChevronsRight size={12} className="text-white/10 absolute -left-5" />}
+                                <div className={clsx(
+                                    "text-xs font-mono transition-all duration-300",
+                                    isActive ? "text-[var(--active-aura)] font-bold glow-text scale-110" : "text-white/20 group-hover:text-white/50"
                                 )}>
                                     {phase.label}
-                                </span>
-                            </button>
-                        );
+                                </div>
+                                {isActive && (
+                                    <div className="absolute -bottom-2 left-0 right-0 h-[1px] bg-[var(--active-aura)] shadow-[0_0_10px_var(--active-aura)]" />
+                                )}
+                            </div>
+                        )
                     })}
                 </div>
 
@@ -352,7 +324,7 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
                 </div>
             </header>
 
-            {/* 2. Context Panel (Left) - Sticky */}
+            {/* 2. Context Panel (Left) - Glassy */}
             <aside className="glass-panel p-4 rounded-xl flex flex-col gap-4 relative">
                 <div className="flex-1 overflow-hidden flex flex-col gap-4">
                     {/* Active Run Card */}
@@ -391,10 +363,9 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
                 </div>
             </aside>
 
-            {/* 3. Main Stage (Center - Agent Console) */}
-            <main className="glass-panel p-1 rounded-xl relative group flex flex-col overflow-hidden">
-                <div className="absolute inset-0 bg-[var(--active-aura)] opacity-5 blur-3xl transition-colors duration-1000 pointer-events-none" />
-
+            {/* 3. Main Stage (Center - Agent Console) - SOLID */}
+            {/* Removed glass-panel class to allow AgentWorkspace to be the solid container */}
+            <main className="p-0 rounded-xl relative group flex flex-col overflow-hidden">
                 {/* Unified Agent Workspace */}
                 <AgentWorkspace
                     currentPhase={currentPhase}
@@ -418,9 +389,9 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
                 />
             </main>
 
-            {/* 4. Insight Panel (Right) - Context & Memory */}
+            {/* 4. Insight Panel (Right) - Glassy */}
             <aside className="glass-panel p-5 rounded-xl flex flex-col relative overflow-hidden gap-4">
-                <LogicVisualizer currentPhase={currentPhase} onTransition={(event) => send({ type: event })} />
+                <LogicVisualizer currentPhase={currentPhase} onTransition={(event) => send({ type: event as any })} />
                 <div className="h-[1px] bg-white/5 w-full my-2" />
                 <div className="text-xs font-bold text-white/40 uppercase tracking-wider">System Status</div>
 

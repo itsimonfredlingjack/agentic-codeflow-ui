@@ -16,7 +16,7 @@ export function BlueprintCard({ content }: { content: string }) {
     }
 
     return (
-        <div className="bg-[#0f172a]/80 border border-blue-500/30 rounded-xl overflow-hidden font-mono text-xs shadow-lg backdrop-blur-sm">
+        <div className="bg-transparent border border-blue-500/50 rounded-xl overflow-hidden font-mono text-xs shadow-lg">
             <div className="bg-blue-500/10 p-3 border-b border-blue-500/20 flex items-center justify-between">
                 <div className="flex items-center gap-2 text-blue-300">
                     <FileJson size={14} />
@@ -28,14 +28,14 @@ export function BlueprintCard({ content }: { content: string }) {
                 <div className="text-white/80 font-bold text-sm mb-2">{planData.title}</div>
                 <div className="space-y-2">
                     {planData.modules?.map((mod: any, i: number) => (
-                        <div key={i} className="flex flex-col gap-1 p-2 bg-black/40 rounded border border-white/5">
+                        <div key={i} className="flex flex-col gap-1 p-2 bg-transparent rounded border border-white/10">
                             <div className="font-bold text-blue-200">{mod.name}</div>
                             <div className="text-white/40 pl-2 border-l border-white/10">{mod.description}</div>
                         </div>
                     ))}
                 </div>
                 <div className="mt-3 pt-3 border-t border-white/10 flex justify-end">
-                    <button className="text-[10px] bg-blue-500 hover:bg-blue-400 text-white px-3 py-1.5 rounded transition-colors flex items-center gap-1">
+                    <button className="text-[10px] border border-blue-500 text-blue-400 hover:bg-blue-500/10 px-3 py-1.5 rounded transition-colors flex items-center gap-1">
                         View Full Graph <ArrowRight size={10} />
                     </button>
                 </div>
@@ -49,7 +49,7 @@ export function BuildStatusCard({ title, progress }: { title: string, progress: 
     const isComplete = progress === 100;
 
     return (
-        <div className="bg-[#022c22]/80 border border-emerald-500/30 rounded-xl p-4 shadow-lg backdrop-blur-sm flex flex-col gap-3">
+        <div className="bg-transparent border border-emerald-500/50 rounded-xl p-4 shadow-lg flex flex-col gap-3">
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                     {isComplete ? (
@@ -63,7 +63,7 @@ export function BuildStatusCard({ title, progress }: { title: string, progress: 
             </div>
 
             {/* Progress Bar */}
-            <div className="h-2 bg-black/40 rounded-full overflow-hidden border border-white/5">
+            <div className="h-2 bg-white/5 rounded-full overflow-hidden border border-white/5">
                 <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: `${progress}%` }}
@@ -81,20 +81,20 @@ export function BuildStatusCard({ title, progress }: { title: string, progress: 
 // --- 3. Security Gate Card (REVIEW Phase) ---
 export function SecurityGateCard({ policy, status }: { policy: string, status: 'pass' | 'fail' | 'warn' }) {
     const config = {
-        pass: { color: 'text-emerald-400', border: 'border-emerald-500/30', bg: 'bg-emerald-500/10', icon: CheckCircle },
-        fail: { color: 'text-red-400', border: 'border-red-500/30', bg: 'bg-red-500/10', icon: Lock },
-        warn: { color: 'text-amber-400', border: 'border-amber-500/30', bg: 'bg-amber-500/10', icon: AlertTriangle }
+        pass: { color: 'text-emerald-400', border: 'border-emerald-500/50', bg: 'bg-transparent', icon: CheckCircle },
+        fail: { color: 'text-red-400', border: 'border-red-500/50', bg: 'bg-transparent', icon: Lock },
+        warn: { color: 'text-amber-400', border: 'border-amber-500/50', bg: 'bg-transparent', icon: AlertTriangle }
     }[status];
 
     const Icon = config.icon;
 
     return (
         <div className={clsx(
-            "rounded-xl p-4 border shadow-lg backdrop-blur-sm flex items-start gap-4 transition-all hover:bg-white/5",
+            "rounded-xl p-4 border shadow-lg flex items-start gap-4 transition-all hover:bg-white/5",
             config.border,
             config.bg
         )}>
-            <div className={clsx("p-2 rounded-lg bg-black/20", config.color)}>
+            <div className={clsx("p-2 rounded-lg border border-white/5", config.color)}>
                 <Icon size={20} />
             </div>
             <div className="flex-1">
