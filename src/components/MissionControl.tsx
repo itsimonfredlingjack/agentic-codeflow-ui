@@ -12,6 +12,7 @@ import { missionControlMachine } from '@/machines/missionControlMachine';
 import { RunList } from './RunList';
 import { SettingsModal } from './SettingsModal';
 import { CommandPalette } from './CommandPalette';
+import { LogicVisualizer } from './LogicVisualizer';
 
 const phases = [
     { id: 'plan', label: 'PLAN', color: 'var(--sapphire)', icon: LayoutGrid },
@@ -267,7 +268,7 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
             )}
 
             {/* 1. Header Board (Top) */}
-            <header className="col-span-3 glass-panel rounded-xl flex items-center justify-between px-6 z-50 bg-[#000000]/20 backdrop-blur-md">
+            <header className="col-span-3 glass-panel rounded-xl flex items-center justify-between px-6 z-50 bg-[#000000]/20 backdrop-blur-md relative h-20">
                 <div className="flex items-center gap-4">
                     <button
                         onClick={() => setLeftPanelOpen(!leftPanelOpen)}
@@ -287,31 +288,50 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
                     <div className="text-xs font-mono text-white/50">PROJECT: GLASS PIPELINE</div>
                 </div>
 
-                {/* Pipeline Tracker */}
-                <div className="flex bg-black/20 rounded-full p-1 border border-white/5" role="tablist" aria-label="Pipeline Stages">
+                {/* Phase Commander v2: ALL IN */}
+                <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-6 bg-black/40 backdrop-blur-xl border border-white/10 rounded-full px-6 py-4 shadow-[0_0_50px_rgba(0,0,0,0.8)] z-50">
+                    {/* Decorative inner ring */}
+                    <div className="absolute inset-1 rounded-full border border-white/5 pointer-events-none" />
+
                     {phases.map((phase) => {
                         const isActive = currentPhase === phase.id;
                         const Icon = phase.icon;
                         return (
                             <button
                                 key={phase.id}
-                                role="tab"
-                                aria-selected={isActive}
                                 onClick={() => send({ type: 'SET_STAGE', stage: phase.id as any })}
                                 className={clsx(
-                                    "px-4 py-2 rounded-full flex items-center gap-2 text-xs font-bold transition-all relative",
-                                    isActive ? "text-white" : "text-white/40 hover:text-white/70"
+                                    "relative px-10 py-5 rounded-full flex items-center justify-center gap-4 transition-all duration-500 group isolation-auto",
+                                    isActive ? "text-white scale-110 z-10" : "text-white/20 hover:text-white/50 hover:bg-white/5"
                                 )}
                             >
                                 {isActive && (
-                                    <motion.div
-                                        layoutId="activeTab"
-                                        className="absolute inset-0 rounded-full bg-white/10 border border-white/20 shadow-lg backdrop-blur-sm"
-                                        transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                                    />
+                                    <>
+                                        {/* Main Glow Spotlight */}
+                                        <motion.div
+                                            layoutId="activeSpotlight"
+                                            className="absolute inset-0 bg-[var(--active-aura)]/20 border border-[var(--active-aura)]/60 rounded-full shadow-[0_0_40px_rgba(var(--active-aura),0.5)]"
+                                            transition={{ type: "spring", bounce: 0.25, duration: 0.7 }}
+                                        />
+                                        {/* Inner "Core" Highlight */}
+                                        <motion.div
+                                            layoutId="activeCore"
+                                            className="absolute inset-2 bg-gradient-to-t from-[var(--active-aura)]/10 to-transparent rounded-full"
+                                            transition={{ duration: 0.5 }}
+                                        />
+                                    </>
                                 )}
-                                <Icon size={14} style={{ color: isActive ? phase.color : undefined }} />
-                                <span className="relative z-10">{phase.label}</span>
+
+                                <span className="relative z-20">
+                                    <Icon size={24} strokeWidth={isActive ? 2.5 : 1.5} className={clsx(isActive && "drop-shadow-[0_0_8px_rgba(255,255,255,0.8)]")} />
+                                </span>
+
+                                <span className={clsx(
+                                    "relative z-20 text-xs font-bold tracking-[0.2em] uppercase transition-all duration-500",
+                                    isActive ? "opacity-100 translate-x-0 w-auto" : "opacity-0 -translate-x-4 w-0 overflow-hidden"
+                                )}>
+                                    {phase.label}
+                                </span>
                             </button>
                         );
                     })}
@@ -400,6 +420,8 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: any }) {
 
             {/* 4. Insight Panel (Right) - Context & Memory */}
             <aside className="glass-panel p-5 rounded-xl flex flex-col relative overflow-hidden gap-4">
+                <LogicVisualizer currentPhase={currentPhase} onTransition={(event) => send({ type: event })} />
+                <div className="h-[1px] bg-white/5 w-full my-2" />
                 <div className="text-xs font-bold text-white/40 uppercase tracking-wider">System Status</div>
 
                 {/* Memory Usage / Context Window */}

@@ -12,7 +12,8 @@
   --foreground: 210 20% 98%;
 
   /* Tint Layers for Contrast (The "Underlay") */
-  --tint-layer: 215 50% 6%;
+  --tint-layer: 0 0% 0%;
+  /* Using pure black here allows the alpha channel in components to control the "optical tint" */
   /* Dark, solid-ish backing for glass */
 
   /* Glass Vars */
@@ -69,11 +70,14 @@ body::before {
 
 /* Utilities */
 .glass-panel {
-  background-color: hsla(var(--tint-layer), 0.7);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(var(--glass-border));
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+  background-color: hsla(220, 20%, 8%, 0.8);
+  /* Neutral Obsidian */
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  /* Fainter border */
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  /* Deeper shadow */
 }
 
 .glass-card {
@@ -120,7 +124,7 @@ body::before {
 .grid-bento {
   display: grid;
   grid-template-columns: 260px 1fr 340px;
-  grid-template-rows: 64px 1fr;
+  grid-template-rows: 96px 1fr;
   height: 100vh;
   gap: 16px;
   padding: 16px;
