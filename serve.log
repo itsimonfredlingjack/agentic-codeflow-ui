@@ -1,0 +1,50 @@
+
+> 02_llm-creative@0.1.0 serve
+> next start -H 0.0.0.0 -p 3001
+
+▲ Next.js 16.1.1
+- Local:         http://localhost:3001
+- Network:       http://0.0.0.0:3001
+
+✓ Starting...
+✓ Ready in 417ms
+[Runtime] Received Intent: INTENT_EXEC_CMD
+⨯ SqliteError: FOREIGN KEY constraint failed
+    at Object.appendEvent (.next/server/chunks/[root-of-the-server]__cd1d4a55._.js:23:121)
+    at o.emit (.next/server/chunks/[root-of-the-server]__cd1d4a55._.js:23:659)
+    at o.executeSafeCommand (.next/server/chunks/[root-of-the-server]__cd1d4a55._.js:23:854)
+    at o.dispatch (.next/server/chunks/[root-of-the-server]__cd1d4a55._.js:23:594)
+    at y (.next/server/chunks/[root-of-the-server]__2f7ce02e._.js:1:1534)
+    at async d (.next/server/chunks/[root-of-the-server]__2f7ce02e._.js:1:4620) {
+  code: 'SQLITE_CONSTRAINT_FOREIGNKEY'
+}
+[Runtime] Received Intent: INTENT_EXEC_CMD
+⨯ SqliteError: FOREIGN KEY constraint failed
+    at Object.appendEvent (.next/server/chunks/[root-of-the-server]__cd1d4a55._.js:23:121)
+    at o.emit (.next/server/chunks/[root-of-the-server]__cd1d4a55._.js:23:659)
+    at o.executeSafeCommand (.next/server/chunks/[root-of-the-server]__cd1d4a55._.js:23:854)
+    at o.dispatch (.next/server/chunks/[root-of-the-server]__cd1d4a55._.js:23:594)
+    at y (.next/server/chunks/[root-of-the-server]__2f7ce02e._.js:1:1534)
+    at async d (.next/server/chunks/[root-of-the-server]__2f7ce02e._.js:1:4620) {
+  code: 'SQLITE_CONSTRAINT_FOREIGNKEY'
+}
+[Runtime] Received Intent: INTENT_EXEC_CMD
+⨯ SqliteError: FOREIGN KEY constraint failed
+    at Object.appendEvent (.next/server/chunks/[root-of-the-server]__cd1d4a55._.js:23:121)
+    at o.emit (.next/server/chunks/[root-of-the-server]__cd1d4a55._.js:23:659)
+    at o.executeSafeCommand (.next/server/chunks/[root-of-the-server]__cd1d4a55._.js:23:854)
+    at o.dispatch (.next/server/chunks/[root-of-the-server]__cd1d4a55._.js:23:594)
+    at y (.next/server/chunks/[root-of-the-server]__2f7ce02e._.js:1:1534)
+    at async d (.next/server/chunks/[root-of-the-server]__2f7ce02e._.js:1:4620) {
+  code: 'SQLITE_CONSTRAINT_FOREIGNKEY'
+}
+[Runtime] Received Intent: INTENT_EXEC_CMD
+⨯ SqliteError: FOREIGN KEY constraint failed
+    at Object.appendEvent (.next/server/chunks/[root-of-the-server]__cd1d4a55._.js:23:121)
+    at o.emit (.next/server/chunks/[root-of-the-server]__cd1d4a55._.js:23:659)
+    at o.executeSafeCommand (.next/server/chunks/[root-of-the-server]__cd1d4a55._.js:23:854)
+    at o.dispatch (.next/server/chunks/[root-of-the-server]__cd1d4a55._.js:23:594)
+    at y (.next/server/chunks/[root-of-the-server]__2f7ce02e._.js:1:1534)
+    at async d (.next/server/chunks/[root-of-the-server]__2f7ce02e._.js:1:4620) {
+  code: 'SQLITE_CONSTRAINT_FOREIGNKEY'
+}
