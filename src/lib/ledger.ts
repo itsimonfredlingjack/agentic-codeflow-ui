@@ -53,6 +53,36 @@ class TaskLedger {
     const rows = stmt.all(runId, limit) as { payload: string }[];
     return rows.map(r => JSON.parse(r.payload)).reverse();
   }
+
+  public saveSnapshot(runId: string, stateValue: string, context: any) {
+    const stmt = this.db.prepare(
+      'INSERT INTO snapshots (run_id, state_value, context, timestamp) VALUES (?, ?, ?, ?)'
+    );
+    stmt.run(runId, stateValue, JSON.stringify(context), Date.now());
+  }
+
+  public loadLatestSnapshot(runId: string) {
+    const stmt = this.db.prepare(
+      'SELECT state_value, context FROM snapshots WHERE run_id = ? ORDER BY id DESC LIMIT 1'
+    );
+    const row = stmt.get(runId) as { state_value: string; context: string } | undefined;
+    if (!row) return null;
+    return {
+      stateValue: row.state_value,
+      context: JSON.parse(row.context)
+    };
+  }
+
+  public getLatestRunId(): string | null {
+    const stmt = this.db.prepare('SELECT id FROM runs ORDER BY created_at DESC LIMIT 1');
+    const row = stmt.get() as { id: string } | undefined;
+    return row ? row.id : null;
+  }
+
+  public createRun(runId: string) {
+      const stmt = this.db.prepare('INSERT OR IGNORE INTO runs (id) VALUES (?)');
+      stmt.run(runId);
+  }
 }
 
 export const ledger = new TaskLedger();

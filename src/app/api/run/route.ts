@@ -1,33 +1,66 @@
 import { NextResponse } from 'next/server';
 import { runtimeManager } from '@/lib/runtimeManager';
+import { ledger } from '@/lib/ledger';
 
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
-    const runId = searchParams.get('runId');
+    let runId = searchParams.get('runId');
+    let isNew = false;
 
+    // 1. Auto-Resume Logic
     if (!runId) {
-        return NextResponse.json({ error: 'Missing runId' }, { status: 400 });
+        const latest = ledger.getLatestRunId();
+        if (latest) {
+            runId = latest;
+        } else {
+            runId = `RUN-${Date.now()}`;
+            isNew = true;
+        }
     }
 
-    // Check if runtime exists/is active
-    // For now, we just acknowledge it.
-    return NextResponse.json({ id: runId, status: 'active' });
+    // 2. Load State (Snapshot)
+    // Even if it's "new" in this request, it might exist in DB if passed via param.
+    // So we always try to load snapshot.
+    const snapshot = ledger.loadLatestSnapshot(runId!);
+    
+    // 3. Ensure Runtime is Active (Idempotent)
+    // If the server restarted, the in-memory runtimeManager is empty.
+    // We strictly use the manager to get (or re-create) the runtime instance.
+    // This does NOT trigger side effects, just ensures the object exists.
+    runtimeManager.getRuntime(runId!);
+
+    if (isNew) {
+        ledger.createRun(runId!);
+    }
+
+    return NextResponse.json({ 
+        id: runId, 
+        context: snapshot ? { 
+            value: snapshot.stateValue, 
+            context: snapshot.context 
+        } : null,
+        isResumed: !!snapshot
+    });
 }
 
 export async function POST(request: Request) {
     const body = await request.json();
-    const { id } = body;
+    const { id, context, status } = body;
 
     if (!id) {
         return NextResponse.json({ error: 'Missing id in body' }, { status: 400 });
     }
 
-    // Initialize the runtime for this run ID
-    // This ensures the ToolRuntime instance is created (and the Subject, etc.)
-    const runtime = runtimeManager.getRuntime(id);
+    // Initialize/Get runtime
+    runtimeManager.getRuntime(id);
     
-    // Optional: Dispatch a system init event
-    // runtime.dispatch({ type: 'INTENT_EXEC_CMD', command: 'echo "System initialized"' }); 
+    // Ensure run exists in ledger
+    ledger.createRun(id);
+
+    // If the UI is explicitly saving a snapshot (persistence loop)
+    if (context && status) {
+        ledger.saveSnapshot(id, typeof status === 'string' ? status : JSON.stringify(status), context);
+    }
 
     return NextResponse.json({ success: true, id });
 }
