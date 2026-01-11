@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import clsx from 'clsx';
+
 
 interface AIAvatarProps {
     phase: 'plan' | 'build' | 'review' | 'deploy';

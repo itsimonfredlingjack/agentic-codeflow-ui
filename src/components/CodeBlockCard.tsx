@@ -1,12 +1,12 @@
 "use client";
 
 import React, { useState } from 'react';
-import { Check, Copy, Terminal, Maximize2, Minus } from 'lucide-react';
+import { Check, Copy, Terminal, Maximize2 } from 'lucide-react';
 import clsx from 'clsx';
 import { motion } from 'framer-motion';
 
 // Simple Regex Syntax Highlighter
-const highlightSyntax = (code: string, language: string) => {
+const highlightSyntax = (code: string, _: string) => {
     // Escape HTML to prevent injection
     let html = code
         .replace(/&/g, "&amp;")

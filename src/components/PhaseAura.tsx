@@ -36,7 +36,7 @@ export function PhaseAura({ phase }: PhaseAuraProps) {
     const config = configs[phase];
 
     return (
-        <div className="absolute inset-0 pointer-events-none overflow-hidden select-none -z-0">
+        <div className="absolute inset-0 pointer-events-none overflow-hidden select-none z-0">
             <AnimatePresence mode="wait">
                 <motion.div
                     key={phase}

@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { FileJson, CheckCircle, AlertTriangle, Loader2, Lock, Unlock, ArrowRight, LayoutTemplate } from 'lucide-react';
+import { FileJson, CheckCircle, AlertTriangle, Loader2, Lock, ArrowRight } from 'lucide-react';
 import clsx from 'clsx';
 
 // --- 1. Blueprint Card (PLAN Phase) ---
@@ -11,7 +11,7 @@ export function BlueprintCard({ content }: { content: string }) {
     let planData;
     try {
         planData = JSON.parse(content);
-    } catch (e) {
+    } catch {
         planData = { title: "System Architecture", nodes: ["Unknown Node"] };
     }
 
@@ -27,7 +27,7 @@ export function BlueprintCard({ content }: { content: string }) {
             <div className="p-4 space-y-3">
                 <div className="text-white/80 font-bold text-sm mb-2">{planData.title}</div>
                 <div className="space-y-2">
-                    {planData.modules?.map((mod: any, i: number) => (
+                    {planData.modules?.map((mod: { name: string; description: string }, i: number) => (
                         <div key={i} className="flex flex-col gap-1 p-2 bg-transparent rounded border border-white/10">
                             <div className="font-bold text-blue-200">{mod.name}</div>
                             <div className="text-white/40 pl-2 border-l border-white/10">{mod.description}</div>

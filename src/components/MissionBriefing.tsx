@@ -1,7 +1,7 @@
 "use client";
 
 import React from 'react';
-import { MessageSquare, BrainCircuit, GitBranch, Link2 } from 'lucide-react';
+import { BrainCircuit, GitBranch } from 'lucide-react';
 
 interface MissionBriefingProps {
     objective?: string;
@@ -35,7 +35,7 @@ export function MissionBriefing({
 
             {/* Objective */}
             <div className="text-sm text-white/70 leading-relaxed font-mono">
-                "{objective}"
+                &ldquo;{objective}&rdquo;
             </div>
 
             {/* Stats */}

@@ -1,7 +1,7 @@
 "use client";
 
 import React from 'react';
-import { Command, Terminal, Cpu, Wifi, Clock } from 'lucide-react';
+import { Terminal, Cpu, Wifi, Clock } from 'lucide-react';
 
 interface StatusBarProps {
     currentPhase: string;

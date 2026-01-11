@@ -1,8 +1,7 @@
 "use client";
 
 import React from 'react';
-import { motion } from 'framer-motion';
-import { PlayCircle, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { PlayCircle, Clock, CheckCircle2 } from 'lucide-react';
 import clsx from 'clsx';
 
 // Mock Data for Runs

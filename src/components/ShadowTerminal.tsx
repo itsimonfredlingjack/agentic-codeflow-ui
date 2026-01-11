@@ -3,8 +3,8 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { ActionCard } from './ActionCard';
 import { ActionCardProps } from '@/types';
-import { motion, AnimatePresence } from 'framer-motion';
-import { List, CreditCard, ChevronDown, Filter, Search } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
+import { List, CreditCard, Filter, Search } from 'lucide-react';
 import clsx from 'clsx';
 
 interface ShadowTerminalProps {
