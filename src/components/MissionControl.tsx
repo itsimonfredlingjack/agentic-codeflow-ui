@@ -372,6 +372,7 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSna
             <main className="p-0 rounded-xl relative group flex flex-col overflow-hidden">
                 {/* Unified Agent Workspace */}
                 <AgentWorkspace
+                    runId={snapshot.context.runId}
                     currentPhase={currentPhase}
                     stream={actions} // Types match ActionCardProps
                     onSendMessage={(msg) => {

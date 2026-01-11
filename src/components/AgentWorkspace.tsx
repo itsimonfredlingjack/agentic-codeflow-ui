@@ -1,17 +1,18 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, Terminal, CheckCircle, ShieldAlert, ChevronRight } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect } from 'react';
+import { Send, Sparkles, Terminal, CheckCircle, ShieldAlert } from 'lucide-react';
 import clsx from 'clsx';
-import { ActionCardProps } from '@/types';
-import { BlueprintCard, BuildStatusCard, SecurityGateCard } from './SemanticCards';
-import { CodeBlockCard } from './CodeBlockCard';
+import type { ActionCardProps, OllamaChatMessage, AgentIntent } from '@/types';
 import { AIAvatar } from './AIAvatar';
 import { PhaseAura } from './PhaseAura';
 import { AgentControls } from './AgentControls';
 import { useAgencyClient } from '@/lib/client';
 import { ShadowTerminal } from './ShadowTerminal';
+
+// Type aliases for client.send calls
+type ExecCmdIntent = Omit<Extract<AgentIntent, { type: 'INTENT_EXEC_CMD' }>, 'header'>;
+type OllamaChatIntent = Omit<Extract<AgentIntent, { type: 'INTENT_OLLAMA_CHAT' }>, 'header'>;
 
 // Extend base types for hybrid stream
 export interface StreamItem extends ActionCardProps {
@@ -31,8 +32,6 @@ interface AgentWorkspaceProps {
 export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onSendMessage }: AgentWorkspaceProps) {
     const [inputValue, setInputValue] = useState('');
     const [localStream, setLocalStream] = useState<StreamItem[]>(initialStream);
-    const scrollRef = useRef<HTMLDivElement>(null);
-    const bottomRef = useRef<HTMLDivElement>(null);
 
     const { lastEvent, client } = useAgencyClient(runId);
 
@@ -48,7 +47,7 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
     useEffect(() => {
         if (!lastEvent) return;
 
-        const new item: StreamItem = {
+        const item: StreamItem = {
             id: `evt-${Date.now()}-${Math.random()}`,
             runId: lastEvent.header.sessionId,
             timestamp: new Date(lastEvent.header.timestamp).toLocaleTimeString(),
@@ -82,16 +81,7 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                 item.title = 'Process Exited';
                 item.content = `Exit Code: ${lastEvent.code}`;
                 break;
-            case 'PHASE_CHANGED':
-                item.type = 'log';
-                item.title = 'Phase Change';
-                item.content = `Transitioned to ${lastEvent.phase}`;
-                break;
-            case 'AGENT_THOUGHT':
-                item.type = 'log';
-                item.title = lastEvent.title;
-                item.content = lastEvent.content;
-                break;
+
             case 'PERMISSION_REQUESTED':
                 item.type = 'security_gate';
                 item.title = 'Permission Required';
@@ -101,8 +91,35 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
             case 'WORKFLOW_ERROR':
                 item.type = 'error';
                 item.title = 'Workflow Error';
-                item.content = lastEvent.message;
+                item.content = lastEvent.error;
                 item.severity = lastEvent.severity === 'fatal' ? 'error' : 'warn';
+                break;
+            case 'OLLAMA_CHAT_STARTED':
+                item.type = 'log';
+                item.title = 'Ollama Chat Started';
+                item.content = `Starting chat with model ${lastEvent.model || 'default'}`;
+                break;
+            case 'OLLAMA_CHAT_COMPLETED':
+                item.type = 'code';
+                item.title = 'Ollama Response';
+                item.content = lastEvent.response.message.content;
+                break;
+            case 'OLLAMA_CHAT_FAILED':
+                item.type = 'error';
+                item.title = 'Ollama Chat Failed';
+                item.content = lastEvent.error;
+                item.severity = 'error';
+                break;
+            case 'OLLAMA_ERROR':
+                item.type = 'error';
+                item.title = 'Ollama Error';
+                item.content = lastEvent.error;
+                item.severity = 'error';
+                break;
+            case 'SYS_READY':
+                item.type = 'log';
+                item.title = 'System Ready';
+                item.content = 'System is ready.';
                 break;
             default:
                 return; // Ignore other events for now
@@ -111,41 +128,85 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
         setLocalStream(prev => [...prev, item]);
     }, [lastEvent, currentPhase]);
 
-
-    // Auto-scroll logic
-    useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [localStream]);
-
     const handleSend = () => {
         if (!inputValue.trim()) return;
-        
-        // Optimistic update
-        const userMsg: StreamItem = {
-            id: Date.now().toString(),
-            runId,
-            type: 'log',
-            title: 'User Input',
-            content: inputValue,
-            timestamp: new Date().toLocaleTimeString(),
-            phase: currentPhase,
-            agentId: 'USER',
-            severity: 'info',
-            isUser: true
-        };
-        setLocalStream(prev => [...prev, userMsg]);
 
-        // Send via Client (if connected) or fallback to prop
-        if (client) {
-            client.send({
-                type: 'INTENT_EXEC_CMD',
-                command: inputValue
-            });
+        if (inputValue.startsWith('/llm')) {
+            const prompt = inputValue.slice(4).trim(); // remove '/llm'
+            if (!prompt) {
+                // add local error
+                const errorItem: StreamItem = {
+                    id: `error-${Date.now()}`,
+                    runId,
+                    type: 'error',
+                    title: 'Invalid Command',
+                    content: 'Usage: /llm <prompt>',
+                    timestamp: new Date().toLocaleTimeString(),
+                    phase: currentPhase,
+                    agentId: 'SYSTEM',
+                    severity: 'error'
+                };
+                setLocalStream(prev => [...prev, errorItem]);
+                setInputValue('');
+                return;
+            }
+            // optimistic user msg
+            const userMsg: StreamItem = {
+                id: Date.now().toString(),
+                runId,
+                type: 'log',
+                title: 'User Input',
+                content: inputValue,
+                timestamp: new Date().toLocaleTimeString(),
+                phase: currentPhase,
+                agentId: 'USER',
+                severity: 'info',
+                isUser: true
+            };
+            setLocalStream(prev => [...prev, userMsg]);
+
+            // send intent
+            if (client) {
+                const intent: OllamaChatIntent = {
+                    type: 'INTENT_OLLAMA_CHAT',
+                    messages: [
+                        { role: 'system', content: 'You are a helpful AI assistant.' },
+                        { role: 'user', content: prompt }
+                    ] as OllamaChatMessage[]
+                };
+                client.send(intent);
+            }
+            setInputValue('');
         } else {
-            onSendMessage(inputValue);
+            // Optimistic update
+            const userMsg: StreamItem = {
+                id: Date.now().toString(),
+                runId,
+                type: 'log',
+                title: 'User Input',
+                content: inputValue,
+                timestamp: new Date().toLocaleTimeString(),
+                phase: currentPhase,
+                agentId: 'USER',
+                severity: 'info',
+                isUser: true
+            };
+            setLocalStream(prev => [...prev, userMsg]);
+
+            // Send via Client (if connected) or fallback to prop
+            const trimmed = inputValue.trim();
+            if (client) {
+                const intent: ExecCmdIntent = {
+                    type: 'INTENT_EXEC_CMD',
+                    command: trimmed
+                };
+                client.send(intent);
+            } else {
+                onSendMessage(trimmed);
+            }
+
+            setInputValue('');
         }
-        
-        setInputValue('');
     };
 
     // Role Configuration
@@ -161,7 +222,7 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
             case 'build': return {
                 icon: Terminal,
                 label: 'ENGINEER',
-                placeholder: 'Enter build command or debugging query...',
+                placeholder: 'Enter build command, debugging query, or /llm prompt...',
                 accent: 'text-[var(--emerald)]',
                 border: 'border-[var(--emerald)]'
             };
