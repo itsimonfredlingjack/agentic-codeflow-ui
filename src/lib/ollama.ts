@@ -1,21 +1,54 @@
 // src/lib/ollama.ts
-// Ollama client utility for interacting with local Ollama API
+// Model-agnostic Ollama service with proper error handling and streaming support
 
-// Read from environment variable (server-side only)
-// Next.js automatically loads .env.local, .env, etc.
-// For server-side code, we can use process.env directly
+import type { OllamaChatRequest, OllamaChatResponse, OllamaOptions } from '@/types';
+
+// Configuration from environment variables
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+const OLLAMA_DEFAULT_MODEL = process.env.OLLAMA_DEFAULT_MODEL || 'starcoder2:3b';
+const OLLAMA_TIMEOUT_MS = parseInt(process.env.OLLAMA_TIMEOUT_MS || '60000', 10);
+
+// ============================================================================
+// Error Classes
+// ============================================================================
+
+export class OllamaError extends Error {
+  constructor(message: string, public statusCode?: number) {
+    super(message);
+    this.name = 'OllamaError';
+  }
+}
+
+export class OllamaConnectionError extends OllamaError {
+  constructor(message = 'Unable to connect to Ollama service') {
+    super(message);
+    this.name = 'OllamaConnectionError';
+  }
+}
+
+export class OllamaTimeoutError extends OllamaError {
+  constructor(message = `Request to Ollama timed out after ${OLLAMA_TIMEOUT_MS}ms`) {
+    super(message);
+    this.name = 'OllamaTimeoutError';
+  }
+}
+
+export class OllamaHttpError extends OllamaError {
+  constructor(message: string, statusCode: number, public responseBody?: string) {
+    super(message, statusCode);
+    this.name = 'OllamaHttpError';
+  }
+}
+
+// ============================================================================
+// Generate Interfaces (not in types.ts)
+// ============================================================================
 
 export interface OllamaGenerateRequest {
-  model: string;
+  model?: string;
   prompt: string;
   stream?: boolean;
-  options?: {
-    temperature?: number;
-    top_p?: number;
-    top_k?: number;
-    num_predict?: number;
-  };
+  options?: OllamaOptions;
 }
 
 export interface OllamaGenerateResponse {
@@ -32,105 +65,273 @@ export interface OllamaGenerateResponse {
   eval_duration?: number;
 }
 
-export interface OllamaChatRequest {
-  model: string;
-  messages: Array<{
-    role: 'system' | 'user' | 'assistant';
-    content: string;
-  }>;
-  stream?: boolean;
-  options?: {
-    temperature?: number;
-    top_p?: number;
-    top_k?: number;
-    num_predict?: number;
-  };
-}
-
-export interface OllamaChatResponse {
-  model: string;
-  created_at: string;
-  message: {
-    role: string;
-    content: string;
-  };
-  done: boolean;
-  total_duration?: number;
-  load_duration?: number;
-  prompt_eval_count?: number;
-  eval_count?: number;
-}
+// ============================================================================
+// Ollama Client
+// ============================================================================
 
 export class OllamaClient {
   private baseUrl: string;
+  private defaultModel: string;
+  private timeoutMs: number;
 
-  constructor(baseUrl: string = OLLAMA_BASE_URL) {
+  constructor(
+    baseUrl: string = OLLAMA_BASE_URL,
+    defaultModel: string = OLLAMA_DEFAULT_MODEL,
+    timeoutMs: number = OLLAMA_TIMEOUT_MS
+  ) {
     this.baseUrl = baseUrl;
+    this.defaultModel = defaultModel;
+    this.timeoutMs = timeoutMs;
   }
 
   /**
-   * Generate text using Ollama
+   * Make HTTP request with timeout and proper error handling
+   */
+  private async fetchWithTimeout(
+    url: string,
+    options: RequestInit
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      return response;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new OllamaTimeoutError();
+      }
+      
+      // Network/connection errors
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        throw new OllamaConnectionError(`Failed to connect to ${this.baseUrl}`);
+      }
+      
+      throw new OllamaConnectionError(
+        `Connection error: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  }
+
+  /**
+   * Handle HTTP error responses
+   */
+  private async handleHttpError(response: Response): Promise<never> {
+    const errorText = await response.text().catch(() => 'Unknown error');
+    throw new OllamaHttpError(
+      `Ollama API error: ${response.status} ${response.statusText}`,
+      response.status,
+      errorText
+    );
+  }
+
+  /**
+   * Generate text (non-streaming)
    */
   async generate(request: OllamaGenerateRequest): Promise<OllamaGenerateResponse> {
-    const response = await fetch(`${this.baseUrl}/api/generate`, {
+    const response = await this.fetchWithTimeout(`${this.baseUrl}/api/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        ...request,
-        stream: false, // Force non-streaming for simplicity
+        model: request.model || this.defaultModel,
+        prompt: request.prompt,
+        stream: false,
+        options: request.options || {},
       }),
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Ollama API error: ${response.status} - ${error}`);
+      await this.handleHttpError(response);
     }
 
     return response.json();
   }
 
   /**
-   * Chat with Ollama (using chat endpoint)
+   * Generate text (streaming)
+   * Returns a ReadableStream of partial responses
    */
-  async chat(request: OllamaChatRequest): Promise<OllamaChatResponse> {
-    const response = await fetch(`${this.baseUrl}/api/chat`, {
+  async generateStream(
+    request: OllamaGenerateRequest
+  ): Promise<ReadableStream<OllamaGenerateResponse>> {
+    const response = await this.fetchWithTimeout(`${this.baseUrl}/api/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        ...request,
-        stream: false,
+        model: request.model || this.defaultModel,
+        prompt: request.prompt,
+        stream: true,
+        options: request.options || {},
       }),
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Ollama API error: ${response.status} - ${error}`);
+      await this.handleHttpError(response);
+    }
+
+    if (!response.body) {
+      throw new OllamaError('Response body is null');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    return new ReadableStream({
+      async pull(controller) {
+        try {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            controller.close();
+            return;
+          }
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n').filter(line => line.trim());
+
+          for (const line of lines) {
+            try {
+              const parsed = JSON.parse(line) as OllamaGenerateResponse;
+              controller.enqueue(parsed);
+            } catch (e) {
+              // Skip invalid JSON lines (might be empty or partial)
+              continue;
+            }
+          }
+        } catch (error) {
+          controller.error(
+            error instanceof Error
+              ? error
+              : new OllamaError('Stream read error')
+          );
+        }
+      },
+      cancel() {
+        reader.cancel();
+      },
+    });
+  }
+
+  /**
+   * Chat (non-streaming)
+   */
+  async chat(request: OllamaChatRequest): Promise<OllamaChatResponse> {
+    const response = await this.fetchWithTimeout(`${this.baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: request.model || this.defaultModel,
+        messages: request.messages,
+        stream: false,
+        options: request.options || {},
+      }),
+    });
+
+    if (!response.ok) {
+      await this.handleHttpError(response);
     }
 
     return response.json();
+  }
+
+  /**
+   * Chat (streaming)
+   * Returns a ReadableStream of partial chat responses
+   */
+  async chatStream(
+    request: OllamaChatRequest
+  ): Promise<ReadableStream<OllamaChatResponse>> {
+    const response = await this.fetchWithTimeout(`${this.baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: request.model || this.defaultModel,
+        messages: request.messages,
+        stream: true,
+        options: request.options || {},
+      }),
+    });
+
+    if (!response.ok) {
+      await this.handleHttpError(response);
+    }
+
+    if (!response.body) {
+      throw new OllamaError('Response body is null');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    return new ReadableStream({
+      async pull(controller) {
+        try {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            controller.close();
+            return;
+          }
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n').filter(line => line.trim());
+
+          for (const line of lines) {
+            try {
+              const parsed = JSON.parse(line) as OllamaChatResponse;
+              controller.enqueue(parsed);
+            } catch (e) {
+              // Skip invalid JSON lines (might be empty or partial)
+              continue;
+            }
+          }
+        } catch (error) {
+          controller.error(
+            error instanceof Error
+              ? error
+              : new OllamaError('Stream read error')
+          );
+        }
+      },
+      cancel() {
+        reader.cancel();
+      },
+    });
   }
 
   /**
    * List available models
    */
-  async listModels(): Promise<{ models: Array<{ name: string; size: number; modified_at: string }> }> {
-    const response = await fetch(`${this.baseUrl}/api/tags`, {
+  async listModels(): Promise<{
+    models: Array<{ name: string; size: number; modified_at: string }>;
+  }> {
+    const response = await this.fetchWithTimeout(`${this.baseUrl}/api/tags`, {
       method: 'GET',
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to list models: ${response.status}`);
+      await this.handleHttpError(response);
     }
 
     return response.json();
   }
 
   /**
-   * Check if Ollama is available
+   * Health check
    */
   async healthCheck(): Promise<boolean> {
     try {
@@ -142,4 +343,5 @@ export class OllamaClient {
   }
 }
 
+// Export singleton instance
 export const ollamaClient = new OllamaClient();

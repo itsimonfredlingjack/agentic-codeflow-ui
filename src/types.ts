@@ -10,20 +10,23 @@ export interface MessageHeader {
 export type OllamaChatRole = 'system' | 'user' | 'assistant';
 
 export interface OllamaChatMessage {
-  role: OllamaChatRole;
-  content: string;
+   role: OllamaChatRole;
+   content: string;
+}
+
+export interface OllamaOptions {
+   temperature?: number;
+   top_p?: number;
+   top_k?: number;
+   num_predict?: number;
+   [key: string]: unknown;
 }
 
 export interface OllamaChatRequest {
-  model?: string;
-  messages: OllamaChatMessage[];
-  options?: {
-    temperature?: number;
-    top_p?: number;
-    top_k?: number;
-    num_predict?: number;
-    [key: string]: any;
-  };
+   model?: string;
+   messages: OllamaChatMessage[];
+   stream?: boolean;
+   options?: OllamaOptions;
 }
 
 export interface OllamaChatResponse {
@@ -40,14 +43,14 @@ export interface OllamaChatResponse {
 
 // --- Agent Intents (UI -> Host) ---
 export type AgentIntent =
-  | { type: 'INTENT_START_BUILD'; header: MessageHeader; blueprint?: any }
+  | { type: 'INTENT_START_BUILD'; header: MessageHeader; blueprint?: Record<string, unknown> }
   | { type: 'INTENT_EXEC_CMD'; header: MessageHeader; command: string }
   | { type: 'INTENT_CANCEL'; header: MessageHeader; targetCorrelationId: string }
   | { type: 'INTENT_GRANT_PERMISSION'; header: MessageHeader; requestId: string }
   | { type: 'INTENT_DENY_PERMISSION'; header: MessageHeader; requestId: string }
   | { type: 'INTENT_RESET'; header: MessageHeader }
-  | { type: 'INTENT_OLLAMA_GENERATE'; header: MessageHeader; model: string; prompt: string; options?: any }
-  | { type: 'INTENT_OLLAMA_CHAT'; header: MessageHeader; messages: OllamaChatMessage[]; model?: string; options?: OllamaChatRequest['options'] };
+   | { type: 'INTENT_OLLAMA_GENERATE'; header: MessageHeader; model: string; prompt: string; options?: OllamaOptions }
+   | { type: 'INTENT_OLLAMA_CHAT'; header: MessageHeader; messages: OllamaChatMessage[]; model?: string; options?: OllamaOptions };
 
 // --- Runtime Events (Host -> UI) ---
 export type RuntimeEvent =
@@ -60,7 +63,7 @@ export type RuntimeEvent =
   | { type: 'PERMISSION_REQUESTED'; header: MessageHeader; requestId: string; command: string; riskLevel: 'high' }
   | { type: 'STATE_SNAPSHOT_SAVED'; header: MessageHeader; stateValue: string }
   | { type: 'WORKFLOW_ERROR'; header: MessageHeader; error: string; severity: 'warn' | 'fatal' }
-  | { type: 'OLLAMA_RESPONSE'; header: MessageHeader; model: string; response: string; metadata?: any }
+   | { type: 'OLLAMA_RESPONSE'; header: MessageHeader; model: string; response: string; metadata?: Record<string, unknown> }
   | { type: 'OLLAMA_ERROR'; header: MessageHeader; error: string; model?: string }
   | { type: 'OLLAMA_CHAT_STARTED'; header: MessageHeader; model?: string }
   | { type: 'OLLAMA_CHAT_COMPLETED'; header: MessageHeader; response: OllamaChatResponse }
@@ -87,6 +90,6 @@ export interface ActionCardProps {
     timestamp: string;
     phase: string;
     agentId?: string;
-    severity?: 'info' | 'warn' | 'error';
-    payload?: any;
+     severity?: 'info' | 'warn' | 'error';
+     payload?: Record<string, unknown>;
 }

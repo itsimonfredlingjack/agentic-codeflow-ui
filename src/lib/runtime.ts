@@ -58,7 +58,7 @@ export class HostRuntime {
   private async handleOllamaGenerate(intent: Extract<AgentIntent, { type: 'INTENT_OLLAMA_GENERATE' }>) {
     try {
       const response = await ollamaClient.generate({
-        model: intent.model || 'starcoder2:3b',
+        model: intent.model, // Will use default from ollamaClient if undefined
         prompt: intent.prompt,
         stream: false,
         options: intent.options || {},
@@ -88,7 +88,7 @@ export class HostRuntime {
   }
 
   private async handleOllamaChat(intent: Extract<AgentIntent, { type: 'INTENT_OLLAMA_CHAT' }>) {
-    const model = intent.model || 'starcoder2:3b';
+    const model = intent.model; // Will use default from ollamaClient if undefined
     
     // Emit started event
     this.emit({
@@ -99,7 +99,7 @@ export class HostRuntime {
 
     try {
       const response = await ollamaClient.chat({
-        model,
+        model: intent.model, // Will use default from ollamaClient if undefined
         messages: intent.messages,
         stream: false,
         options: intent.options || {},

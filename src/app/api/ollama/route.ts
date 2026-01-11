@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ollamaClient } from '@/lib/ollama';
+import { ollamaClient, OllamaError, OllamaTimeoutError, OllamaConnectionError } from '@/lib/ollama';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,9 +12,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { action, model, prompt, messages, options } = body;
 
-    // Default to starcoder2:3b if no model specified
-    const targetModel = model || 'starcoder2:3b';
-
     if (action === 'generate') {
       if (!prompt) {
         return NextResponse.json(
@@ -24,7 +21,7 @@ export async function POST(request: NextRequest) {
       }
 
       const response = await ollamaClient.generate({
-        model: targetModel,
+        model,
         prompt,
         stream: false,
         options: options || {},
@@ -53,7 +50,7 @@ export async function POST(request: NextRequest) {
       }
 
       const response = await ollamaClient.chat({
-        model: targetModel,
+        model,
         messages,
         stream: false,
         options: options || {},
@@ -72,17 +69,40 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    return NextResponse.json(
-      { error: 'Invalid action. Use "generate" or "chat"' },
-      { status: 400 }
-    );
-  } catch (error: any) {
-    console.error('[Ollama API] Error:', error);
-    return NextResponse.json(
-      { error: error.message || 'Failed to communicate with Ollama' },
-      { status: 500 }
-    );
-  }
+     return NextResponse.json(
+       { error: 'Invalid action. Use "generate" or "chat"' },
+       { status: 400 }
+     );
+   } catch (error) {
+     console.error('[Ollama API] Error:', error);
+
+     if (error instanceof OllamaTimeoutError) {
+       return NextResponse.json(
+         { error: 'Request to Ollama timed out. Please try again.' },
+         { status: 504 }
+       );
+     }
+
+     if (error instanceof OllamaConnectionError) {
+       return NextResponse.json(
+         { error: 'Unable to connect to Ollama. Please check that Ollama is running.' },
+         { status: 503 }
+       );
+     }
+
+     if (error instanceof OllamaError) {
+       const status = error.statusCode === 400 ? 400 : 500;
+       return NextResponse.json(
+         { error: 'Ollama service error. Please check your request.' },
+         { status }
+       );
+     }
+
+     return NextResponse.json(
+       { error: 'An unexpected error occurred while communicating with Ollama.' },
+       { status: 500 }
+     );
+   }
 }
 
 /**
@@ -111,15 +131,37 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    return NextResponse.json(
-      { error: 'Invalid action. Use "models" or "health"' },
-      { status: 400 }
-    );
-  } catch (error: any) {
-    console.error('[Ollama API] Error:', error);
-    return NextResponse.json(
-      { error: error.message || 'Failed to communicate with Ollama' },
-      { status: 500 }
-    );
-  }
+     return NextResponse.json(
+       { error: 'Invalid action. Use "models" or "health"' },
+       { status: 400 }
+     );
+   } catch (error) {
+     console.error('[Ollama API] Error:', error);
+
+     if (error instanceof OllamaTimeoutError) {
+       return NextResponse.json(
+         { error: 'Request to Ollama timed out. Please try again.' },
+         { status: 504 }
+       );
+     }
+
+     if (error instanceof OllamaConnectionError) {
+       return NextResponse.json(
+         { error: 'Unable to connect to Ollama. Please check that Ollama is running.' },
+         { status: 503 }
+       );
+     }
+
+     if (error instanceof OllamaError) {
+       return NextResponse.json(
+         { error: 'Ollama service error. Please check your request.' },
+         { status: 500 }
+       );
+     }
+
+     return NextResponse.json(
+       { error: 'An unexpected error occurred while communicating with Ollama.' },
+       { status: 500 }
+     );
+   }
 }
