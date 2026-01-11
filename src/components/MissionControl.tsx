@@ -155,10 +155,40 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSna
     useEffect(() => {
         const fetchEvents = async () => {
             try {
-                const res = await fetch('/api/events');
+                const res = await fetch(`/api/events?runId=${snapshot.context.runId}`);
                 if (res.ok) {
                     const data = await res.json();
-                    setActions(data);
+                    
+                    // Map RuntimeEvent to ActionCardProps for the UI
+                    const mappedEvents = data.map((event: any, index: number) => {
+                        const base = {
+                            id: `${snapshot.context.runId}-${index}`,
+                            runId: snapshot.context.runId,
+                            timestamp: event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString(),
+                            phase: currentPhase,
+                            agentId: 'SYSTEM',
+                            severity: 'info' as const,
+                        };
+
+                        switch (event.type) {
+                            case 'LOG_STDOUT':
+                                return { ...base, type: 'command', content: event.content, title: 'STDOUT' };
+                            case 'LOG_STDERR':
+                                return { ...base, type: 'error', content: event.content, title: 'STDERR', severity: 'error' };
+                            case 'AGENT_THOUGHT':
+                                return { ...base, type: 'log', title: event.title, content: event.content };
+                            case 'ARTIFACT_GENERATED':
+                                return { ...base, type: 'code', title: event.name, content: event.content };
+                            case 'ERROR':
+                                return { ...base, type: 'error', title: 'Error', content: event.message, severity: event.severity === 'fatal' ? 'error' : 'warn' };
+                            case 'PHASE_CHANGED':
+                                return { ...base, type: 'log', title: 'Phase Changed', content: `Transitioned to ${event.phase}` };
+                            default:
+                                return { ...base, type: 'log', title: event.type, content: JSON.stringify(event) };
+                        }
+                    });
+                    
+                    setActions(mappedEvents);
                 }
             } catch (err) {
                 console.error("Failed to fetch ledger:", err);
@@ -166,89 +196,26 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSna
         };
 
         fetchEvents(); // Initial load
-        const interval = setInterval(fetchEvents, 1000); // Poll every 1s
+        const interval = setInterval(fetchEvents, 2000); // Poll every 2s
         return () => clearInterval(interval);
-    }, []);
+    }, [snapshot.context.runId, currentPhase]);
 
-    // Simulate AGENT WRITING to the Ledger
-    // In a real app, this would be the backend agent process, not the UI
-    useEffect(() => {
-        if (isLockdown) return; // Stop simulation in lockdown
-
-        // Whitelisted commands that pass Sentinel
-        const safeCommands = [
-            'npm install lodash',
-            'npm run build',
-            'git status',
-            'git add .',
-            'mkdir components',
-            'echo "Build complete"'
-        ];
-
-        const timer = setInterval(async () => {
-            const seed = Math.random();
-            let type: string = 'log';
-            let title = 'Phase Update';
-            let content = `Processing step in ${currentPhase} sequence...`;
-            let payload = {};
-
-            // Simulate Structured Events based on Phase
-            if (currentPhase === 'plan' && seed > 0.7) {
-                type = 'plan_artifact';
-                title = 'Architecture Draft';
-                content = JSON.stringify({
-                    title: "System Architecture v1.0",
-                    modules: [
-                        { name: "Auth Service", description: "Handles JWT issuance and validation" },
-                        { name: "Payment Gateway", description: "Stripe integration via Webhooks" }
-                    ]
-                });
-            } else if (currentPhase === 'build' && seed > 0.6) {
-                type = 'build_status';
-                title = seed > 0.8 ? 'Compiling Assets' : 'Installing Dependencies';
-                content = '';
-                payload = { progress: Math.floor(Math.random() * 100) };
-            } else if (currentPhase === 'review' && seed > 0.8) {
-                type = 'security_gate';
-                title = 'Security Check';
-                content = '';
-                payload = {
-                    policy: "No Hardcoded Secrets",
-                    status: Math.random() > 0.5 ? 'pass' : 'warn'
-                };
-            } else if (currentPhase === 'build' && seed > 0.4 && seed < 0.6) {
-                type = 'code';
-                title = 'Generated Component';
-                content = `import React from 'react';\n\nexport const GeneratedComponent = () => {\n  return (\n    <div className="p-4 bg-emerald-500/10">\n      <h1>Auto-Generated</h1>\n    </div>\n  );\n};`;
-            } else if (seed > 0.9) {
-                type = 'command';
-                title = 'Executed Command';
-                content = safeCommands[Math.floor(Math.random() * safeCommands.length)];
-            }
-
-
-            const newAction: ActionCardProps & { payload?: Record<string, unknown> } = {
-                id: Math.random().toString(),
-                runId: snapshot.context.runId,
-                type: type as ActionCardProps['type'],
-                title: title,
-                content: content,
-                timestamp: new Date().toLocaleTimeString(),
-                phase: currentPhase,
-                agentId: currentPhase === 'plan' ? 'architect-01' : 'builder-01',
-                severity: 'info',
-                payload: payload
-            };
-
-            // Post to API (Task Ledger)
+    // UI Input Handler - Dispatch Intents to Host
+    const handleSendMessage = async (msg: string) => {
+        // 1. Dispatch intent to the Host
+        try {
             await fetch('/api/events', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newAction)
+                body: JSON.stringify({
+                    runId: snapshot.context.runId,
+                    intent: { type: 'INTENT_EXEC_CMD', command: msg }
+                })
             });
-        }, 4000);
-        return () => clearInterval(timer);
-    }, [currentPhase, snapshot.context.runId, isLockdown]);
+        } catch (err) {
+            console.error("Failed to dispatch intent:", err);
+        }
+    };
 
     // Handle Review Gate Unlock
     const handleUnlock = () => {
@@ -422,6 +389,7 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSna
                             isUser: true
                         };
                         setActions(prev => [...prev, userMsg]);
+                        handleSendMessage(msg);
                     }}
                 />
             </main>

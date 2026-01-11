@@ -1,47 +1,33 @@
 import { NextResponse } from 'next/server';
-import db from '@/lib/db';
+import { runtimeManager } from '@/lib/runtimeManager';
 
-interface RunRow {
-    id: string;
-    start_time: string;
-    context: string;
-    status: string;
-}
+export async function GET(request: Request) {
+    const { searchParams } = new URL(request.url);
+    const runId = searchParams.get('runId');
 
-export async function GET() {
-    // Get the most recent run
-    const run = db.prepare('SELECT * FROM runs ORDER BY start_time DESC LIMIT 1').get() as RunRow | undefined;
-
-    if (!run) {
-        return NextResponse.json(null);
+    if (!runId) {
+        return NextResponse.json({ error: 'Missing runId' }, { status: 400 });
     }
 
-    return NextResponse.json({
-        id: run.id,
-        context: JSON.parse(run.context),
-        status: run.status,
-        startTime: run.start_time
-    });
+    // Check if runtime exists/is active
+    // For now, we just acknowledge it.
+    return NextResponse.json({ id: runId, status: 'active' });
 }
 
 export async function POST(request: Request) {
     const body = await request.json();
-    const { id, context, status } = body;
+    const { id } = body;
 
-    const stmt = db.prepare(`
-        INSERT INTO runs (id, start_time, context, status)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            context = excluded.context,
-            status = excluded.status
-    `);
+    if (!id) {
+        return NextResponse.json({ error: 'Missing id in body' }, { status: 400 });
+    }
 
-    stmt.run(
-        id,
-        new Date().toISOString(),
-        JSON.stringify(context),
-        status
-    );
+    // Initialize the runtime for this run ID
+    // This ensures the ToolRuntime instance is created (and the Subject, etc.)
+    const runtime = runtimeManager.getRuntime(id);
+    
+    // Optional: Dispatch a system init event
+    // runtime.dispatch({ type: 'INTENT_EXEC_CMD', command: 'echo "System initialized"' }); 
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, id });
 }
