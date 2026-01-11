@@ -1,9 +1,10 @@
 // src/lib/runtime.ts
 import { Subject } from 'rxjs';
 import { v4 as uuidv4 } from 'uuid';
-import { AgentIntent, RuntimeEvent, MessageHeader } from '@/types';
+import { AgentIntent, RuntimeEvent, MessageHeader, OllamaChatResponse } from '@/types';
 import { ledger } from './ledger';
 import { TerminalService } from './terminal';
+import { ollamaClient } from './ollama';
 
 export class HostRuntime {
   private eventStream = new Subject<RuntimeEvent>();
@@ -42,6 +43,95 @@ export class HostRuntime {
 
         // Execute if safe
         this.terminal.execute(intent.header, intent.command, (event) => this.emit(event));
+    }
+
+    // 3. Ollama Integration
+    if (intent.type === 'INTENT_OLLAMA_GENERATE') {
+      this.handleOllamaGenerate(intent);
+    }
+
+    if (intent.type === 'INTENT_OLLAMA_CHAT') {
+      this.handleOllamaChat(intent);
+    }
+  }
+
+  private async handleOllamaGenerate(intent: Extract<AgentIntent, { type: 'INTENT_OLLAMA_GENERATE' }>) {
+    try {
+      const response = await ollamaClient.generate({
+        model: intent.model || 'starcoder2:3b',
+        prompt: intent.prompt,
+        stream: false,
+        options: intent.options || {},
+      });
+
+      this.emit({
+        type: 'OLLAMA_RESPONSE',
+        header: intent.header,
+        model: response.model,
+        response: response.response,
+        metadata: {
+          total_duration: response.total_duration,
+          load_duration: response.load_duration,
+          prompt_eval_count: response.prompt_eval_count,
+          eval_count: response.eval_count,
+          eval_duration: response.eval_duration,
+        },
+      });
+    } catch (error: any) {
+      this.emit({
+        type: 'OLLAMA_ERROR',
+        header: intent.header,
+        error: error.message || 'Failed to generate with Ollama',
+        model: intent.model,
+      });
+    }
+  }
+
+  private async handleOllamaChat(intent: Extract<AgentIntent, { type: 'INTENT_OLLAMA_CHAT' }>) {
+    const model = intent.model || 'starcoder2:3b';
+    
+    // Emit started event
+    this.emit({
+      type: 'OLLAMA_CHAT_STARTED',
+      header: intent.header,
+      model,
+    });
+
+    try {
+      const response = await ollamaClient.chat({
+        model,
+        messages: intent.messages,
+        stream: false,
+        options: intent.options || {},
+      });
+
+      // Convert to OllamaChatResponse format
+      const chatResponse: OllamaChatResponse = {
+        model: response.model,
+        created_at: response.created_at,
+        message: response.message,
+        done: response.done,
+        total_duration: response.total_duration,
+        load_duration: response.load_duration,
+        prompt_eval_count: response.prompt_eval_count,
+        eval_count: response.eval_count,
+        eval_duration: response.eval_duration,
+      };
+
+      // Emit completed event
+      this.emit({
+        type: 'OLLAMA_CHAT_COMPLETED',
+        header: intent.header,
+        response: chatResponse,
+      });
+    } catch (error: any) {
+      // Emit failed event
+      this.emit({
+        type: 'OLLAMA_CHAT_FAILED',
+        header: intent.header,
+        model,
+        error: error.message || 'Failed to chat with Ollama',
+      });
     }
   }
 
