@@ -1,97 +1,68 @@
-import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
+// src/lib/terminal.ts
+import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
+import treeKill from 'tree-kill';
+import { RuntimeEvent, MessageHeader } from '@/types';
 
-export class SecurityViolationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'SecurityViolationError';
-  }
-}
+export class TerminalService {
+    private activeProcesses = new Map<string, ChildProcess>(); // correlationId -> Process
+    private projectRoot = process.cwd(); // Default to current CWD
 
-export class TerminalRunner {
-  private currentProcess: ChildProcessWithoutNullStreams | null = null;
-  private projectRoot: string;
-
-  constructor(projectRoot: string = process.cwd()) {
-    this.projectRoot = path.resolve(projectRoot);
-  }
-
-  /**
-   * Validates that the command does not attempt path traversal
-   * and runs within the project root.
-   */
-  private validateCommand(command: string) {
-    // Check for path traversal attempts
-    if (command.includes('..') || command.includes('~')) {
-        throw new SecurityViolationError('Path traversal detected. Command blocked.');
-    }
-    
-    // Additional blocklist could go here
-    const blockList = [/rm\s+-rf/, /sudo/, /:(){ :|:& };:/];
-    if (blockList.some(regex => regex.test(command))) {
-        throw new SecurityViolationError('Dangerous command detected. Blocked.');
-    }
-  }
-
-  public execute(
-    command: string, 
-    callbacks: {
-      onStdout: (data: string) => void;
-      onStderr: (data: string) => void;
-      onExit: (code: number | null) => void;
-    },
-    timeoutMs: number = 300000 // 5 minutes default
-  ): number | undefined {
-    this.validateCommand(command);
-
-    // Spawn process in its own group to allow killing the entire tree
-    this.currentProcess = spawn(command, {
-      cwd: this.projectRoot,
-      shell: true,
-      detached: true, // Needed for process group management
-      env: { ...process.env, FORCE_COLOR: '1' }
-    });
-
-    const pid = this.currentProcess.pid;
-    if (!pid) {
-        throw new Error('Failed to spawn process');
-    }
-
-    const timer = setTimeout(() => {
-        if (this.currentProcess) {
-            callbacks.onStderr('\n[Terminal] 🛑 Command timed out.');
-            this.kill();
+    public execute(
+        header: MessageHeader,
+        command: string, 
+        onEvent: (e: RuntimeEvent) => void
+    ) {
+        // 1. Security Check (Sandbox Light)
+        // I en riktig app, validera att command inte försöker göra cd ../
+        if (command.includes('..') || command.includes('/etc')) {
+            onEvent({
+                type: 'SECURITY_VIOLATION',
+                header,
+                policy: 'PATH_TRAVERSAL_DETECTED',
+                attemptedPath: command
+            });
+            return;
         }
-    }, timeoutMs);
 
-    // Stream listeners
-    this.currentProcess.stdout.on('data', (data) => {
-      callbacks.onStdout(data.toString());
-    });
+        // 2. Spawn Process
+        const [cmd, ...args] = command.split(' ');
+        const child = spawn(cmd, args, { 
+            cwd: this.projectRoot, 
+            shell: true,
+            env: { ...process.env, FORCE_COLOR: 'true' } 
+        });
 
-    this.currentProcess.stderr.on('data', (data) => {
-      callbacks.onStderr(data.toString());
-    });
+        this.activeProcesses.set(header.correlationId, child);
 
-    this.currentProcess.on('close', (code) => {
-      clearTimeout(timer);
-      this.currentProcess = null;
-      callbacks.onExit(code);
-    });
+        onEvent({ 
+            type: 'PROCESS_STARTED', 
+            header, 
+            pid: child.pid || 0, 
+            command 
+        });
 
-    return pid;
-  }
+        // 3. Stream Output
+        child.stdout?.on('data', (data) => {
+            onEvent({ type: 'STDOUT_CHUNK', header, content: data.toString() });
+        });
 
-  public kill() {
-    if (this.currentProcess && this.currentProcess.pid) {
-      try {
-        // Kill the process group (negative PID) to kill the tree
-        process.kill(-this.currentProcess.pid, 'SIGTERM');
-      } catch (e) {
-        // Fallback to standard kill if group kill fails
-        this.currentProcess.kill();
-      }
-      this.currentProcess = null;
+        child.stderr?.on('data', (data) => {
+            onEvent({ type: 'STDERR_CHUNK', header, content: data.toString() });
+        });
+
+        // 4. Handle Exit
+        child.on('close', (code) => {
+            this.activeProcesses.delete(header.correlationId);
+            onEvent({ type: 'PROCESS_EXITED', header, code: code || 0 });
+        });
     }
-  }
+
+    public kill(correlationId: string) {
+        const child = this.activeProcesses.get(correlationId);
+        if (child && child.pid) {
+            treeKill(child.pid);
+            this.activeProcesses.delete(correlationId);
+        }
+    }
 }

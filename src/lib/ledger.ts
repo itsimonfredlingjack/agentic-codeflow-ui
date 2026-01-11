@@ -1,3 +1,4 @@
+// src/lib/ledger.ts
 import Database from 'better-sqlite3';
 import { RuntimeEvent } from '@/types';
 
@@ -36,19 +37,11 @@ class TaskLedger {
     `);
   }
 
-  public createRun(runId: string) {
-    const stmt = this.db.prepare('INSERT OR IGNORE INTO runs (id) VALUES (?)');
-    stmt.run(runId);
-  }
-
-  // Blixtsnabb insert (Fire-and-forget)
   public appendEvent(runId: string, event: RuntimeEvent) {
-    this.createRun(runId);
     const stmt = this.db.prepare(
       'INSERT INTO event_log (run_id, type, payload, timestamp) VALUES (?, ?, ?, ?)'
     );
-
-    stmt.run(runId, event.type, JSON.stringify(event), event.header.timestamp);
+    stmt.run(runId, event.type, JSON.stringify(event), Date.now());
   }
 
   public saveSnapshot(runId: string, stateValue: string, context: any) {
@@ -64,6 +57,11 @@ class TaskLedger {
     );
     const rows = stmt.all(runId, limit) as { payload: string }[];
     return rows.map(r => JSON.parse(r.payload)).reverse();
+  }
+
+  public createRun(runId: string) {
+      const stmt = this.db.prepare('INSERT OR IGNORE INTO runs (id) VALUES (?)');
+      stmt.run(runId);
   }
 }
 

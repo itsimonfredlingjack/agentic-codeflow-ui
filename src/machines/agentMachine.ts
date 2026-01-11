@@ -4,108 +4,71 @@ import { ledger } from '@/lib/ledger';
 
 export const agentMachine = setup({
   types: {
-    context: {} as { runId: string; retries: number; error: string | null; pendingRequestId?: string },
+    context: {} as { runId: string; retries: number; error: string | null },
     events: {} as 
       | { type: 'START_PLANNING' }
       | { type: 'PLAN_COMPLETE' }
-      | { type: 'EDIT_PLAN' }
+      | { type: 'START_BUILD' }
       | { type: 'BUILD_SUCCESS' }
       | { type: 'BUILD_ERROR'; message: string }
       | { type: 'APPROVE_DEPLOY' }
-      | { type: 'PERMISSION_REQUIRED'; requestId: string }
-      | { type: 'PERMISSION_GRANTED' }
-      | { type: 'PERMISSION_DENIED' }
+      | { type: 'RETRY' }
   },
   actions: {
-    saveSnapshot: ({ context, event, self }) => {
-      const state = self.getSnapshot();
-      ledger.saveSnapshot(context.runId, state.value as string, context);
-    }
+      persistState: ({ context, event }, params) => {
+         // Mock runId for now, ideally passed in context
+         ledger.saveSnapshot(context.runId || 'default', event.type, context);
+      }
   }
 }).createMachine({
   id: 'agentWorkflow',
   initial: 'idle',
-  context: ({ input }) => ({ 
-    runId: (input as any)?.runId || 'INIT',
-    retries: 0, 
-    error: null 
-  }),
-  entry: ['saveSnapshot'],
+  context: { runId: 'init', retries: 0, error: null },
   states: {
     idle: {
       on: { START_PLANNING: 'planning' }
     },
     planning: {
-      on: { 
-        PLAN_COMPLETE: 'plan_edit',
-        EDIT_PLAN: 'plan_edit'
-      }
-    },
-    plan_edit: {
-      on: { 
-        PLAN_COMPLETE: 'building'
-      }
+      entry: 'persistState',
+      on: { PLAN_COMPLETE: 'building' }
     },
     building: {
+      entry: 'persistState',
       initial: 'executing',
-      entry: ['saveSnapshot'],
-      on: {
-         PERMISSION_REQUIRED: {
-           target: '.waiting_for_permission',
-           actions: [
-             assign({ pendingRequestId: ({ event }) => (event as any).requestId }),
-             'saveSnapshot'
-           ]
-         }
-      },
       states: {
         executing: {
           on: {
             BUILD_SUCCESS: '#agentWorkflow.reviewing',
             BUILD_ERROR: {
               target: 'analyzing_error',
-              actions: [
-                assign({ error: ({ event }) => (event as any).message }),
-                'saveSnapshot'
-              ]
+              actions: assign({ error: ({ event }) => event.message })
             }
-          }
-        },
-        waiting_for_permission: {
-          on: {
-            PERMISSION_GRANTED: 'executing',
-            PERMISSION_DENIED: '#agentWorkflow.needs_assistance'
           }
         },
         analyzing_error: {
           after: {
             1000: [
-              { target: 'auto_fixing', guard: ({ context }) => context.retries < 3 },
+              { target: 'retrying', guard: ({ context }) => context.retries < 3 },
               { target: '#agentWorkflow.needs_assistance' }
             ]
           }
         },
-        auto_fixing: {
-          entry: [
-            assign({ retries: ({ context }) => context.retries + 1 }),
-            'saveSnapshot'
-          ],
-          after: { 500: 'executing' } 
+        retrying: {
+          entry: assign({ retries: ({ context }) => context.retries + 1 }),
+          after: { 500: 'executing' }
         }
       }
     },
     reviewing: {
-      on: { APPROVE_DEPLOY: 'gate_ready' }
-    },
-    gate_ready: {
+      entry: 'persistState',
       on: { APPROVE_DEPLOY: 'deploying' }
     },
     needs_assistance: {
-      entry: ['saveSnapshot']
+      entry: 'persistState',
+      on: { RETRY: 'building.retrying' }
     },
     deploying: {
-      type: 'final',
-      entry: ['saveSnapshot']
+      type: 'final'
     }
   }
 });
