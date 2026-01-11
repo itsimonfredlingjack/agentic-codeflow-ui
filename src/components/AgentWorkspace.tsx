@@ -10,6 +10,8 @@ import { CodeBlockCard } from './CodeBlockCard';
 import { AIAvatar } from './AIAvatar';
 import { PhaseAura } from './PhaseAura';
 import { AgentControls } from './AgentControls';
+import { useAgencyClient } from '@/lib/client';
+import { ShadowTerminal } from './ShadowTerminal';
 
 // Extend base types for hybrid stream
 export interface StreamItem extends ActionCardProps {
@@ -20,24 +22,129 @@ export interface StreamItem extends ActionCardProps {
 }
 
 interface AgentWorkspaceProps {
+    runId: string;
     currentPhase: 'plan' | 'build' | 'review' | 'deploy';
     stream: StreamItem[];
     onSendMessage: (message: string) => void;
 }
 
-export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWorkspaceProps) {
+export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onSendMessage }: AgentWorkspaceProps) {
     const [inputValue, setInputValue] = useState('');
+    const [localStream, setLocalStream] = useState<StreamItem[]>(initialStream);
     const scrollRef = useRef<HTMLDivElement>(null);
     const bottomRef = useRef<HTMLDivElement>(null);
+
+    const { lastEvent, client } = useAgencyClient(runId);
+
+    // Sync initial stream if it changes (e.g. initial load)
+    useEffect(() => {
+        if (initialStream.length > 0) {
+             // Basic de-duplication could go here
+             setLocalStream(initialStream);
+        }
+    }, [initialStream]);
+
+    // Handle Real-time Events
+    useEffect(() => {
+        if (!lastEvent) return;
+
+        const new item: StreamItem = {
+            id: `evt-${Date.now()}-${Math.random()}`,
+            runId: lastEvent.header.sessionId,
+            timestamp: new Date(lastEvent.header.timestamp).toLocaleTimeString(),
+            phase: currentPhase, // Or derive from event if available
+            title: 'System Event',
+            content: '',
+            type: 'log',
+            severity: 'info',
+            agentId: 'SYSTEM'
+        };
+
+        switch (lastEvent.type) {
+            case 'STDOUT_CHUNK':
+                item.type = 'command';
+                item.title = 'STDOUT';
+                item.content = lastEvent.content;
+                break;
+            case 'STDERR_CHUNK':
+                item.type = 'error';
+                item.title = 'STDERR';
+                item.content = lastEvent.content;
+                item.severity = 'error';
+                break;
+            case 'PROCESS_STARTED':
+                item.type = 'log';
+                item.title = 'Process Started';
+                item.content = `$ ${lastEvent.command} (PID: ${lastEvent.pid})`;
+                break;
+            case 'PROCESS_EXITED':
+                item.type = 'log';
+                item.title = 'Process Exited';
+                item.content = `Exit Code: ${lastEvent.code}`;
+                break;
+            case 'PHASE_CHANGED':
+                item.type = 'log';
+                item.title = 'Phase Change';
+                item.content = `Transitioned to ${lastEvent.phase}`;
+                break;
+            case 'AGENT_THOUGHT':
+                item.type = 'log';
+                item.title = lastEvent.title;
+                item.content = lastEvent.content;
+                break;
+            case 'PERMISSION_REQUESTED':
+                item.type = 'security_gate';
+                item.title = 'Permission Required';
+                item.content = `Command: ${lastEvent.command}`;
+                item.payload = { policy: 'Manual Approval', status: 'warn' };
+                break;
+            case 'WORKFLOW_ERROR':
+                item.type = 'error';
+                item.title = 'Workflow Error';
+                item.content = lastEvent.message;
+                item.severity = lastEvent.severity === 'fatal' ? 'error' : 'warn';
+                break;
+            default:
+                return; // Ignore other events for now
+        }
+
+        setLocalStream(prev => [...prev, item]);
+    }, [lastEvent, currentPhase]);
+
 
     // Auto-scroll logic
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [stream]);
+    }, [localStream]);
 
     const handleSend = () => {
         if (!inputValue.trim()) return;
-        onSendMessage(inputValue);
+        
+        // Optimistic update
+        const userMsg: StreamItem = {
+            id: Date.now().toString(),
+            runId,
+            type: 'log',
+            title: 'User Input',
+            content: inputValue,
+            timestamp: new Date().toLocaleTimeString(),
+            phase: currentPhase,
+            agentId: 'USER',
+            severity: 'info',
+            isUser: true
+        };
+        setLocalStream(prev => [...prev, userMsg]);
+
+        // Send via Client (if connected) or fallback to prop
+        if (client) {
+            client.send({
+                type: 'INTENT_EXEC_CMD',
+                command: inputValue
+            });
+        } else {
+            onSendMessage(inputValue);
+        }
+        
         setInputValue('');
     };
 
@@ -87,7 +194,7 @@ export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWor
             <div className="h-14 border-b border-white/5 flex items-center px-6 justify-between bg-black/20 z-10 shrink-0">
                 <div className="flex items-center gap-4">
                     <div className="relative scale-75 origin-left">
-                        <AIAvatar phase={currentPhase} isProcessing={stream.some(s => s.isTyping)} />
+                        <AIAvatar phase={currentPhase} isProcessing={localStream.some(s => s.isTyping)} />
                     </div>
                     <div className="flex flex-col">
                         <div className={clsx("text-sm font-bold tracking-widest flex items-center gap-2", config.accent)}>
@@ -95,118 +202,22 @@ export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWor
                             <span style={{ textShadow: '0 0 10px currentColor' }}>AI_{config.label}</span>
                         </div>
                         <div className="text-[10px] text-white/40 tracking-wider">
-                            SESSION ID: <span className="text-white/60">0x1A4F</span> • EVENTS: {stream.length}
+                            SESSION ID: <span className="text-white/60">{runId.slice(0, 8)}</span> • EVENTS: {localStream.length}
                         </div>
                     </div>
                 </div>
                 <div className="flex items-center gap-2 text-[10px] text-white/20">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    SYSTEM ONLINE
+                    <div className={clsx("w-1.5 h-1.5 rounded-full", client ? "bg-emerald-500 animate-pulse" : "bg-red-500")} />
+                    {client ? "SYSTEM ONLINE" : "DISCONNECTED"}
                 </div>
             </div>
 
-            {/* Stream Area - Vertical Timeline */}
+            {/* Stream Area - Vertical Timeline OR Shadow Terminal */}
             <div
-                className="flex-1 overflow-y-auto p-6 console-stream scroll-smooth relative"
-                ref={scrollRef}
+                className="flex-1 overflow-hidden relative"
             >
-                {/* Timeline Line */}
-                <div className="absolute left-8 top-0 bottom-0 w-px bg-white/10" />
-
-                <div className="space-y-8 pl-8">
-                    <AnimatePresence initial={false}>
-                        {stream.map((item) => (
-                            <motion.div
-                                key={item.id}
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className="w-full relative"
-                            >
-                                {/* Timeline Node Indicator */}
-                                <div className={clsx(
-                                    "absolute -left-[37px] top-1 w-2.5 h-2.5 rounded-full border-2 bg-[#050505]",
-                                    item.isUser ? "border-white/40" : config.border
-                                )} />
-
-                                {item.isUser ? (
-                                    // User Entry
-                                    <div className="flex flex-col gap-1">
-                                        <div className="flex items-center gap-2 text-xs text-white/40">
-                                            <span className="font-bold text-white/60">USER</span>
-                                            <ChevronRight size={10} />
-                                            <span className="font-mono">{item.timestamp}</span>
-                                        </div>
-                                        <div className="text-white/90 text-sm leading-relaxed whitespace-pre-wrap font-sans pl-2 border-l-2 border-white/10 py-1">
-                                            {item.content}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    // AI Entry
-                                    <div className="flex flex-col gap-2">
-                                        <div className="flex items-center gap-2 text-xs text-white/40">
-                                            <span className={clsx("font-bold", config.accent)}>{item.agentId || 'SYSTEM'}</span>
-                                            <span className="px-1 py-0.5 rounded border border-white/10 text-[9px] uppercase">{item.phase}</span>
-                                            <span className="font-mono">{item.timestamp}</span>
-                                        </div>
-
-                                        {/* Content based on type */}
-                                        <div className="pl-0">
-                                            {item.type === 'plan_artifact' ? (
-                                                <BlueprintCard content={item.content} />
-                                            ) : item.type === 'build_status' ? (
-                                                <BuildStatusCard
-                                                    title={item.title}
-                                                    progress={(item.payload?.progress as number) || 0}
-                                                />
-                                            ) : item.type === 'code' ? (
-                                                <CodeBlockCard code={item.content} language="typescript" />
-                                            ) : item.type === 'security_gate' ? (
-                                                <SecurityGateCard
-                                                    policy={(item.payload?.policy as string) || "Standard Policy"}
-                                                    status={(item.payload?.status as 'pass' | 'warn' | 'fail') || 'warn'}
-                                                />
-                                            ) : item.type === 'command' ? (
-                                                <div className="font-mono text-xs text-emerald-400/90 flex items-center gap-2">
-                                                    <span className="text-white/40">$</span>
-                                                    {item.content}
-                                                </div>
-                                            ) : item.type === 'error' ? (
-                                                <div className="text-red-400 text-sm flex items-start gap-2 bg-red-950/10 border-l-2 border-red-500/50 p-2">
-                                                    <ShieldAlert size={14} className="shrink-0 mt-0.5" />
-                                                    {item.content}
-                                                </div>
-                                            ) : (
-                                                <div className="text-white/80 text-sm font-mono leading-relaxed">
-                                                    {item.title && (
-                                                        <div className="font-bold text-white/90 mb-1 flex items-center gap-2">
-                                                            {item.title}
-                                                        </div>
-                                                    )}
-                                                    {item.content}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                            </motion.div>
-                        ))}
-                    </AnimatePresence>
-
-                    {/* Typing Indicator */}
-                    {stream.some(s => s.isTyping) && (
-                        <div className="relative">
-                            <div className={clsx(
-                                "absolute -left-[37px] top-1 w-2.5 h-2.5 rounded-full border-2 bg-[#050505] animate-pulse",
-                                config.border
-                            )} />
-                            <div className="text-xs text-white/30 font-mono animate-pulse">
-                                AI_AGENT IS PROCESSING...
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                <div ref={bottomRef} className="h-4" />
+               {/* Using ShadowTerminal for the output area as requested */}
+               <ShadowTerminal actions={localStream} />
             </div>
 
             {/* Elite HUD Enhancements */}
