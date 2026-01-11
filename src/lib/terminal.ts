@@ -27,8 +27,8 @@ export class TerminalRunner {
     }
     
     // Additional blocklist could go here
-    const blockList = ['rm -rf /', ':(){ :|:& };:'];
-    if (blockList.some(blocked => command.includes(blocked))) {
+    const blockList = [/rm\s+-rf/, /sudo/, /:(){ :|:& };:/];
+    if (blockList.some(regex => regex.test(command))) {
         throw new SecurityViolationError('Dangerous command detected. Blocked.');
     }
   }

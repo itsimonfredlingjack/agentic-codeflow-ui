@@ -32,12 +32,12 @@ export async function executeWithAutoFix(
     try {
       await executeSingle(runner, currentCommand, onLog);
       return; // Success!
-    } catch (error: any) {
+    } catch (error) {
       if (attempt === maxRetries) {
         throw new MaxRetriesExceededError(command);
       }
 
-      const errorLog = error.message || '';
+      const errorLog = error instanceof Error ? error.message : String(error);
       const fix = getAiFix(errorLog);
 
       if (fix) {

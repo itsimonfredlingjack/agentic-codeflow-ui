@@ -1,13 +1,12 @@
-// src/lib/ledger.ts
 import Database from 'better-sqlite3';
-import { RuntimeEvent } from './types';
+import { RuntimeEvent } from '@/types';
 
 class TaskLedger {
   private db: Database.Database;
 
   constructor() {
     this.db = new Database('task_ledger.db');
-    this.db.pragma('journal_mode = WAL'); // Performance boost
+    this.db.pragma('journal_mode = WAL'); 
     this.init();
   }
 
@@ -26,7 +25,7 @@ class TaskLedger {
         timestamp INTEGER,
         FOREIGN KEY(run_id) REFERENCES runs(id)
       );
-      
+
       CREATE TABLE IF NOT EXISTS snapshots (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         run_id TEXT,
@@ -37,21 +36,19 @@ class TaskLedger {
     `);
   }
 
+  public createRun(runId: string) {
+    const stmt = this.db.prepare('INSERT OR IGNORE INTO runs (id) VALUES (?)');
+    stmt.run(runId);
+  }
+
   // Blixtsnabb insert (Fire-and-forget)
   public appendEvent(runId: string, event: RuntimeEvent) {
+    this.createRun(runId);
     const stmt = this.db.prepare(
       'INSERT INTO event_log (run_id, type, payload, timestamp) VALUES (?, ?, ?, ?)'
     );
-    // Vi lagrar hela eventet som JSON för flexibilitet
-    stmt.run(runId, event.type, JSON.stringify(event), Date.now());
-  }
 
-  public getRecentEvents(runId: string, limit = 100): RuntimeEvent[] {
-    const stmt = this.db.prepare(
-      'SELECT payload FROM event_log WHERE run_id = ? ORDER BY id DESC LIMIT ?'
-    );
-    const rows = stmt.all(runId, limit) as { payload: string }[];
-    return rows.map(r => JSON.parse(r.payload)).reverse();
+    stmt.run(runId, event.type, JSON.stringify(event), event.header.timestamp);
   }
 
   public saveSnapshot(runId: string, stateValue: string, context: any) {
@@ -61,27 +58,12 @@ class TaskLedger {
     stmt.run(runId, stateValue, JSON.stringify(context), Date.now());
   }
 
-  public loadLatestSnapshot(runId: string) {
+  public getRecentEvents(runId: string, limit = 100): RuntimeEvent[] {
     const stmt = this.db.prepare(
-      'SELECT state_value, context FROM snapshots WHERE run_id = ? ORDER BY id DESC LIMIT 1'
+      'SELECT payload FROM event_log WHERE run_id = ? ORDER BY id DESC LIMIT ?'
     );
-    const row = stmt.get(runId) as { state_value: string; context: string } | undefined;
-    if (!row) return null;
-    return {
-      stateValue: row.state_value,
-      context: JSON.parse(row.context)
-    };
-  }
-
-  public getLatestRunId(): string | null {
-    const stmt = this.db.prepare('SELECT id FROM runs ORDER BY created_at DESC LIMIT 1');
-    const row = stmt.get() as { id: string } | undefined;
-    return row ? row.id : null;
-  }
-
-  public createRun(runId: string) {
-      const stmt = this.db.prepare('INSERT OR IGNORE INTO runs (id) VALUES (?)');
-      stmt.run(runId);
+    const rows = stmt.all(runId, limit) as { payload: string }[];
+    return rows.map(r => JSON.parse(r.payload)).reverse();
   }
 }
 

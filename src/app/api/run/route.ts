@@ -13,7 +13,7 @@ export async function GET(request: Request) {
         if (latest) {
             runId = latest;
         } else {
-            runId = `RUN-${Date.now()}`;
+            runId = `RUN-${crypto.randomUUID()}`;
             isNew = true;
         }
     }
