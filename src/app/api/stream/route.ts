@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { runtimeManager } from '@/lib/runtimeManager';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);

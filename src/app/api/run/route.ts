@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { runtimeManager } from '@/lib/runtimeManager';
 import { ledger } from '@/lib/ledger';
 
+export const runtime = 'nodejs';
+
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     let runId = searchParams.get('runId');

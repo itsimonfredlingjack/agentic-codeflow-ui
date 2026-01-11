@@ -62,11 +62,16 @@ class AgencyClient {
       }
     } as AgentIntent;
 
-    await fetch('/api/command', {
+    const response = await fetch('/api/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ runId: this.runId, intent: fullIntent })
     });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`HTTP ${response.status}: ${text.substring(0, 500)}`);
+    }
   }
 }
 

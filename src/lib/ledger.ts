@@ -1,17 +1,47 @@
 // src/lib/ledger.ts
-import Database from 'better-sqlite3';
+import { createRequire } from 'node:module';
 import { RuntimeEvent } from '@/types';
 
+interface InMemoryEvent {
+  runId: string;
+  type: string;
+  payload: RuntimeEvent;
+  timestamp: number;
+}
+
+interface InMemorySnapshot {
+  runId: string;
+  stateValue: string;
+  context: unknown;
+  timestamp: number;
+}
+
 class TaskLedger {
-  private db: Database.Database;
+  private db: any;
+  private useInMemory: boolean;
+  private events: InMemoryEvent[] = [];
+  private snapshots: InMemorySnapshot[] = [];
+  private runs: Map<string, number> = new Map();
 
   constructor() {
-    this.db = new Database('task_ledger.db');
-    this.db.pragma('journal_mode = WAL'); 
-    this.init();
+    this.useInMemory = false;
+    try {
+      const require = createRequire(import.meta.url);
+      const Database = require('better-sqlite3');
+      this.db = new Database('task_ledger.db');
+      this.db.pragma('journal_mode = WAL'); 
+      this.init();
+    } catch (error) {
+      console.warn('better-sqlite3 not available, using in-memory fallback:', error);
+      this.useInMemory = true;
+      console.log('Running in in-memory mode - data will be lost on restart');
+    }
   }
 
   private init() {
+    if (this.useInMemory) {
+      return; // In-memory mode doesn't need initialization
+    }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS runs (
         id TEXT PRIMARY KEY,
@@ -38,13 +68,31 @@ class TaskLedger {
   }
 
   public appendEvent(runId: string, event: RuntimeEvent) {
+    if (this.useInMemory) {
+      this.events.push({
+        runId,
+        type: event.type,
+        payload: event,
+        timestamp: Date.now()
+      });
+      return;
+    }
     const stmt = this.db.prepare(
       'INSERT INTO event_log (run_id, type, payload, timestamp) VALUES (?, ?, ?, ?)'
     );
     stmt.run(runId, event.type, JSON.stringify(event), Date.now());
   }
 
-  public saveSnapshot(runId: string, stateValue: string, context: any) {
+  public saveSnapshot(runId: string, stateValue: string, context: unknown) {
+    if (this.useInMemory) {
+      this.snapshots.push({
+        runId,
+        stateValue,
+        context,
+        timestamp: Date.now()
+      });
+      return;
+    }
     const stmt = this.db.prepare(
       'INSERT INTO snapshots (run_id, state_value, context, timestamp) VALUES (?, ?, ?, ?)'
     );
@@ -52,6 +100,14 @@ class TaskLedger {
   }
 
   public getRecentEvents(runId: string, limit = 100): RuntimeEvent[] {
+    if (this.useInMemory) {
+      return this.events
+        .filter(e => e.runId === runId)
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, limit)
+        .map(e => e.payload)
+        .reverse();
+    }
     const stmt = this.db.prepare(
       'SELECT payload FROM event_log WHERE run_id = ? ORDER BY id DESC LIMIT ?'
     );
@@ -60,8 +116,59 @@ class TaskLedger {
   }
 
   public createRun(runId: string) {
-      const stmt = this.db.prepare('INSERT OR IGNORE INTO runs (id) VALUES (?)');
-      stmt.run(runId);
+    if (this.useInMemory) {
+      if (!this.runs.has(runId)) {
+        this.runs.set(runId, Date.now());
+      }
+      return;
+    }
+    const stmt = this.db.prepare('INSERT OR IGNORE INTO runs (id) VALUES (?)');
+    stmt.run(runId);
+  }
+
+  public getLatestRunId(): string | null {
+    if (this.useInMemory) {
+      let latestRunId: string | null = null;
+      let latestTimestamp = -1;
+      for (const [runId, createdAt] of this.runs.entries()) {
+        if (createdAt > latestTimestamp) {
+          latestTimestamp = createdAt;
+          latestRunId = runId;
+        }
+      }
+      return latestRunId;
+    }
+    const stmt = this.db.prepare('SELECT id FROM runs ORDER BY created_at DESC LIMIT 1');
+    const row = stmt.get() as { id: string } | undefined;
+    return row?.id || null;
+  }
+
+  public loadLatestSnapshot(runId: string): { stateValue: string; context: unknown } | null {
+    if (this.useInMemory) {
+      const latest = this.snapshots
+        .filter(snapshot => snapshot.runId === runId)
+        .sort((a, b) => b.timestamp - a.timestamp)[0];
+      if (!latest) return null;
+      return {
+        stateValue: latest.stateValue,
+        context: latest.context
+      };
+    }
+    const stmt = this.db.prepare('SELECT state_value, context FROM snapshots WHERE run_id = ? ORDER BY timestamp DESC LIMIT 1');
+    const row = stmt.get(runId) as { state_value: string; context: string } | undefined;
+    if (!row) return null;
+    
+    try {
+      return {
+        stateValue: row.state_value,
+        context: JSON.parse(row.context)
+      };
+    } catch {
+      return {
+        stateValue: row.state_value,
+        context: null
+      };
+    }
   }
 }
 

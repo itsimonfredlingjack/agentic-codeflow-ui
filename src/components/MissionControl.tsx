@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useMachine } from '@xstate/react';
 import { ReviewGate } from './ReviewGate';
 import { AgentWorkspace } from './AgentWorkspace';
-import { ActionCardProps } from '@/types';
+import { ActionCardProps, RuntimeEvent } from '@/types';
 import { LayoutGrid, Cpu, Shield, Zap, Activity, PanelLeft, Settings, ChevronsRight } from 'lucide-react';
 import clsx from 'clsx';
 import { missionControlMachine } from '@/machines/missionControlMachine';
@@ -48,8 +48,11 @@ export function MissionControl() {
 
     useEffect(() => {
         const loadSession = async () => {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 1500);
+
             try {
-                const res = await fetch('/api/run');
+                const res = await fetch('/api/run', { signal: controller.signal });
                 if (res.ok) {
                     const data = await res.json();
                     if (data && data.context) {
@@ -58,8 +61,13 @@ export function MissionControl() {
                     }
                 }
             } catch (err) {
-                console.warn("Failed to load session", err);
+                if (err instanceof Error && err.name === 'AbortError') {
+                    console.warn("Session load timeout");
+                } else {
+                    console.warn("Failed to load session", err);
+                }
             } finally {
+                clearTimeout(timeoutId);
                 setIsLoading(false);
             }
         };
@@ -159,32 +167,38 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSna
                 if (res.ok) {
                     const data = await res.json();
                     
-                    // Map RuntimeEvent to ActionCardProps for the UI
-                    const mappedEvents = data.map((event: any, index: number) => {
+                     // Map RuntimeEvent to ActionCardProps for the UI
+                    const mappedEvents = data.map((event: RuntimeEvent, index: number) => {
                         const base = {
                             id: `${snapshot.context.runId}-${index}`,
                             runId: snapshot.context.runId,
-                            timestamp: event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString(),
+                            timestamp: new Date(event.header.timestamp).toLocaleTimeString(),
                             phase: currentPhase,
                             agentId: 'SYSTEM',
                             severity: 'info' as const,
                         };
 
                         switch (event.type) {
-                            case 'LOG_STDOUT':
-                                return { ...base, type: 'command', content: event.content, title: 'STDOUT' };
-                            case 'LOG_STDERR':
-                                return { ...base, type: 'error', content: event.content, title: 'STDERR', severity: 'error' };
-                            case 'AGENT_THOUGHT':
-                                return { ...base, type: 'log', title: event.title, content: event.content };
-                            case 'ARTIFACT_GENERATED':
-                                return { ...base, type: 'code', title: event.name, content: event.content };
-                            case 'ERROR':
-                                return { ...base, type: 'error', title: 'Error', content: event.message, severity: event.severity === 'fatal' ? 'error' : 'warn' };
-                            case 'PHASE_CHANGED':
-                                return { ...base, type: 'log', title: 'Phase Changed', content: `Transitioned to ${event.phase}` };
+                            case 'STDOUT_CHUNK':
+                                return { ...base, type: 'command' as const, content: event.content, title: 'STDOUT' };
+                            case 'STDERR_CHUNK':
+                                return { ...base, type: 'error' as const, content: event.content, title: 'STDERR', severity: 'error' as const };
+                            case 'WORKFLOW_ERROR':
+                                return { ...base, type: 'error' as const, title: 'Error', content: event.error, severity: event.severity };
+                            case 'OLLAMA_CHAT_COMPLETED':
+                                return { ...base, type: 'log' as const, title: 'Ollama Chat', content: event.response.message.content };
+                            case 'OLLAMA_ERROR':
+                                return { ...base, type: 'error' as const, title: 'Ollama Error', content: event.error, severity: 'error' as const };
+                            case 'PROCESS_STARTED':
+                                return { ...base, type: 'log' as const, title: 'Process Started', content: `PID: ${event.pid}, Command: ${event.command}` };
+                            case 'PROCESS_EXITED':
+                                return { ...base, type: 'log' as const, title: 'Process Exited', content: `Exit code: ${event.code}` };
+                            case 'SECURITY_VIOLATION':
+                                return { ...base, type: 'error' as const, title: 'Security Violation', content: `Policy: ${event.policy}, Path: ${event.attemptedPath}`, severity: 'error' as const };
+                            case 'PERMISSION_REQUESTED':
+                                return { ...base, type: 'log' as const, title: 'Permission Request', content: `Command: ${event.command}, Risk: ${event.riskLevel}` };
                             default:
-                                return { ...base, type: 'log', title: event.type, content: JSON.stringify(event) };
+                                return { ...base, type: 'log' as const, title: event.type, content: JSON.stringify(event) };
                         }
                     });
                     

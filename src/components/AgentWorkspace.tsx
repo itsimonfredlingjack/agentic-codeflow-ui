@@ -10,6 +10,16 @@ import { AgentControls } from './AgentControls';
 import { useAgencyClient } from '@/lib/client';
 import { ShadowTerminal } from './ShadowTerminal';
 
+const DEFAULT_SYSTEM_PROMPT = 'You are a helpful AI assistant.';
+
+// Helper to cap chat history: keep system prompt + last 20 non-system messages
+const capChatHistory = (history: OllamaChatMessage[]): OllamaChatMessage[] => {
+    if (history.length === 0) return history;
+    const nonSystem = history.slice(1);
+    const cappedNonSystem = nonSystem.slice(-20);
+    return [history[0], ...cappedNonSystem];
+};
+
 // Type aliases for client.send calls
 type ExecCmdIntent = Omit<Extract<AgentIntent, { type: 'INTENT_EXEC_CMD' }>, 'header'>;
 type OllamaChatIntent = Omit<Extract<AgentIntent, { type: 'INTENT_OLLAMA_CHAT' }>, 'header'>;
@@ -32,6 +42,7 @@ interface AgentWorkspaceProps {
 export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onSendMessage }: AgentWorkspaceProps) {
     const [inputValue, setInputValue] = useState('');
     const [localStream, setLocalStream] = useState<StreamItem[]>(initialStream);
+    const [chatHistory, setChatHistory] = useState<OllamaChatMessage[]>([{ role: 'system', content: DEFAULT_SYSTEM_PROMPT }]);
 
     const { lastEvent, client } = useAgencyClient(runId);
 
@@ -103,6 +114,8 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                 item.type = 'code';
                 item.title = 'Ollama Response';
                 item.content = lastEvent.response.message.content;
+                // append assistant message to history
+                setChatHistory(prev => capChatHistory([...prev, { role: 'assistant', content: lastEvent.response.message.content }]));
                 break;
             case 'OLLAMA_CHAT_FAILED':
                 item.type = 'error';
@@ -128,7 +141,7 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
         setLocalStream(prev => [...prev, item]);
     }, [lastEvent, currentPhase]);
 
-    const handleSend = () => {
+    const handleSend = async () => {
         if (!inputValue.trim()) return;
 
         if (inputValue.startsWith('/llm')) {
@@ -165,16 +178,32 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
             };
             setLocalStream(prev => [...prev, userMsg]);
 
+            // compute next history synchronously and send that
+            const nextHistory = capChatHistory([...chatHistory, { role: 'user', content: prompt }]);
+            setChatHistory(nextHistory);
+
             // send intent
             if (client) {
                 const intent: OllamaChatIntent = {
                     type: 'INTENT_OLLAMA_CHAT',
-                    messages: [
-                        { role: 'system', content: 'You are a helpful AI assistant.' },
-                        { role: 'user', content: prompt }
-                    ] as OllamaChatMessage[]
+                    messages: nextHistory
                 };
-                client.send(intent);
+                try {
+                    await client.send(intent);
+                } catch (error) {
+                    const errorItem: StreamItem = {
+                        id: `error-${Date.now()}`,
+                        runId,
+                        type: 'error',
+                        title: 'Dispatch Failed',
+                        content: error instanceof Error ? error.message : String(error),
+                        timestamp: new Date().toLocaleTimeString(),
+                        phase: currentPhase,
+                        agentId: 'SYSTEM',
+                        severity: 'error'
+                    };
+                    setLocalStream(prev => [...prev, errorItem]);
+                }
             }
             setInputValue('');
         } else {
@@ -200,7 +229,22 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                     type: 'INTENT_EXEC_CMD',
                     command: trimmed
                 };
-                client.send(intent);
+                try {
+                    await client.send(intent);
+                } catch (error) {
+                    const errorItem: StreamItem = {
+                        id: `error-${Date.now()}`,
+                        runId,
+                        type: 'error',
+                        title: 'Dispatch Failed',
+                        content: error instanceof Error ? error.message : String(error),
+                        timestamp: new Date().toLocaleTimeString(),
+                        phase: currentPhase,
+                        agentId: 'SYSTEM',
+                        severity: 'error'
+                    };
+                    setLocalStream(prev => [...prev, errorItem]);
+                }
             } else {
                 onSendMessage(trimmed);
             }
@@ -298,27 +342,27 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                     <textarea
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                                e.preventDefault();
-                                handleSend();
-                            }
-                        }}
+                         onKeyDown={(e) => {
+                             if (e.key === 'Enter' && !e.shiftKey) {
+                                 e.preventDefault();
+                                 void handleSend();
+                             }
+                         }}
                         placeholder={config.placeholder}
                         className="flex-1 bg-transparent border-none focus:ring-0 text-white/90 placeholder:text-white/20 resize-none py-3 px-0 min-h-[48px] max-h-[200px] text-sm font-mono leading-relaxed focus:outline-none"
                     />
 
                     <div className="flex flex-col justify-end p-2">
-                        <button
-                            onClick={handleSend}
-                            disabled={!inputValue.trim()}
-                            className={clsx(
-                                "p-2 rounded transition-all",
-                                inputValue.trim()
-                                    ? config.accent
-                                    : "text-white/10"
-                            )}
-                        >
+                         <button
+                             onClick={() => void handleSend()}
+                             disabled={!inputValue.trim()}
+                             className={clsx(
+                                 "p-2 rounded transition-all",
+                                 inputValue.trim()
+                                     ? config.accent
+                                     : "text-white/10"
+                             )}
+                         >
                             {inputValue.trim() ? <Send size={14} /> : null}
                         </button>
                     </div>
