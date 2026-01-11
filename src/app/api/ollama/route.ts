@@ -1,7 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ollamaClient, OllamaError, OllamaTimeoutError, OllamaConnectionError } from '@/lib/ollama';
+import { ollamaClient, OllamaError, OllamaTimeoutError, OllamaConnectionError, OllamaHttpError } from '@/lib/ollama';
+import type { OllamaChatMessage, OllamaChatRole } from '@/types';
 
 export const dynamic = 'force-dynamic';
+
+// Valid roles for chat messages
+const VALID_ROLES: OllamaChatRole[] = ['system', 'user', 'assistant'];
+
+/**
+ * Validate chat messages structure
+ */
+function validateMessages(messages: unknown): messages is OllamaChatMessage[] {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return false;
+  }
+  
+  return messages.every((msg) => {
+    if (typeof msg !== 'object' || msg === null) return false;
+    const m = msg as Record<string, unknown>;
+    return (
+      typeof m.role === 'string' &&
+      VALID_ROLES.includes(m.role as OllamaChatRole) &&
+      typeof m.content === 'string'
+    );
+  });
+}
+
+/**
+ * Validate model parameter
+ */
+function validateModel(model: unknown): model is string | undefined {
+  return model === undefined || typeof model === 'string';
+}
+
+/**
+ * Validate options parameter
+ */
+function validateOptions(options: unknown): options is Record<string, unknown> | undefined {
+  return options === undefined || (typeof options === 'object' && options !== null && !Array.isArray(options));
+}
 
 /**
  * POST /api/ollama
@@ -12,10 +49,26 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { action, model, prompt, messages, options } = body;
 
+    // Validate model
+    if (!validateModel(model)) {
+      return NextResponse.json(
+        { error: 'Invalid model parameter. Must be a string or undefined.' },
+        { status: 400 }
+      );
+    }
+
+    // Validate options
+    if (!validateOptions(options)) {
+      return NextResponse.json(
+        { error: 'Invalid options parameter. Must be an object or undefined.' },
+        { status: 400 }
+      );
+    }
+
     if (action === 'generate') {
-      if (!prompt) {
+      if (!prompt || typeof prompt !== 'string') {
         return NextResponse.json(
-          { error: 'Missing prompt for generate action' },
+          { error: 'Missing or invalid prompt for generate action. Must be a non-empty string.' },
           { status: 400 }
         );
       }
@@ -42,9 +95,9 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'chat') {
-      if (!messages || !Array.isArray(messages)) {
+      if (!validateMessages(messages)) {
         return NextResponse.json(
-          { error: 'Missing or invalid messages for chat action' },
+          { error: 'Missing or invalid messages for chat action. Must be a non-empty array of {role, content} objects with valid roles (system, user, assistant).' },
           { status: 400 }
         );
       }
@@ -90,11 +143,21 @@ export async function POST(request: NextRequest) {
        );
      }
 
-     if (error instanceof OllamaError) {
-       const status = error.statusCode === 400 ? 400 : 500;
+     if (error instanceof OllamaHttpError) {
+       // Map HTTP errors to appropriate status codes
+       const status = error.statusCode >= 400 && error.statusCode < 500 
+         ? error.statusCode 
+         : 502; // Bad Gateway for 5xx from Ollama
        return NextResponse.json(
          { error: 'Ollama service error. Please check your request.' },
          { status }
+       );
+     }
+
+     if (error instanceof OllamaError) {
+       return NextResponse.json(
+         { error: 'Ollama service error. Please check your request.' },
+         { status: 500 }
        );
      }
 
@@ -127,7 +190,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         success: true,
         healthy: isHealthy,
-        baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
       });
     }
 
@@ -149,6 +211,17 @@ export async function GET(request: NextRequest) {
        return NextResponse.json(
          { error: 'Unable to connect to Ollama. Please check that Ollama is running.' },
          { status: 503 }
+       );
+     }
+
+     if (error instanceof OllamaHttpError) {
+       // Map HTTP errors to appropriate status codes
+       const status = error.statusCode >= 400 && error.statusCode < 500 
+         ? error.statusCode 
+         : 502; // Bad Gateway for 5xx from Ollama
+       return NextResponse.json(
+         { error: 'Ollama service error. Please check your request.' },
+         { status }
        );
      }
 

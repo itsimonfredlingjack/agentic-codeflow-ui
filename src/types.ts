@@ -49,8 +49,8 @@ export type AgentIntent =
   | { type: 'INTENT_GRANT_PERMISSION'; header: MessageHeader; requestId: string }
   | { type: 'INTENT_DENY_PERMISSION'; header: MessageHeader; requestId: string }
   | { type: 'INTENT_RESET'; header: MessageHeader }
-   | { type: 'INTENT_OLLAMA_GENERATE'; header: MessageHeader; model: string; prompt: string; options?: OllamaOptions }
-   | { type: 'INTENT_OLLAMA_CHAT'; header: MessageHeader; messages: OllamaChatMessage[]; model?: string; options?: OllamaOptions };
+  | { type: 'INTENT_OLLAMA_GENERATE'; header: MessageHeader; model?: string; prompt: string; options?: OllamaOptions }
+  | { type: 'INTENT_OLLAMA_CHAT'; header: MessageHeader; messages: OllamaChatMessage[]; model?: string; options?: OllamaOptions };
 
 // --- Runtime Events (Host -> UI) ---
 export type RuntimeEvent =

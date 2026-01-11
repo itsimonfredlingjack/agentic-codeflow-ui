@@ -185,6 +185,7 @@ export class OllamaClient {
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    let buffer = ''; // Buffer for incomplete lines across chunks
 
     return new ReadableStream({
       async pull(controller) {
@@ -192,20 +193,37 @@ export class OllamaClient {
           const { done, value } = await reader.read();
           
           if (done) {
+            // Process any remaining buffer
+            if (buffer.trim()) {
+              try {
+                const parsed = JSON.parse(buffer.trim()) as OllamaGenerateResponse;
+                controller.enqueue(parsed);
+              } catch (e) {
+                // Ignore incomplete final line
+              }
+            }
             controller.close();
             return;
           }
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n').filter(line => line.trim());
+          // Decode chunk and append to buffer
+          buffer += decoder.decode(value, { stream: true });
+          
+          // Split on newlines, keeping incomplete line in buffer
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep last (potentially incomplete) line in buffer
 
+          // Parse complete lines
           for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            
             try {
-              const parsed = JSON.parse(line) as OllamaGenerateResponse;
+              const parsed = JSON.parse(trimmed) as OllamaGenerateResponse;
               controller.enqueue(parsed);
             } catch (e) {
-              // Skip invalid JSON lines (might be empty or partial)
-              continue;
+              // Skip invalid JSON (shouldn't happen with proper Ollama responses)
+              console.warn('[Ollama] Failed to parse stream line:', trimmed);
             }
           }
         } catch (error) {
@@ -276,6 +294,7 @@ export class OllamaClient {
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    let buffer = ''; // Buffer for incomplete lines across chunks
 
     return new ReadableStream({
       async pull(controller) {
@@ -283,20 +302,37 @@ export class OllamaClient {
           const { done, value } = await reader.read();
           
           if (done) {
+            // Process any remaining buffer
+            if (buffer.trim()) {
+              try {
+                const parsed = JSON.parse(buffer.trim()) as OllamaChatResponse;
+                controller.enqueue(parsed);
+              } catch (e) {
+                // Ignore incomplete final line
+              }
+            }
             controller.close();
             return;
           }
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n').filter(line => line.trim());
+          // Decode chunk and append to buffer
+          buffer += decoder.decode(value, { stream: true });
+          
+          // Split on newlines, keeping incomplete line in buffer
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep last (potentially incomplete) line in buffer
 
+          // Parse complete lines
           for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            
             try {
-              const parsed = JSON.parse(line) as OllamaChatResponse;
+              const parsed = JSON.parse(trimmed) as OllamaChatResponse;
               controller.enqueue(parsed);
             } catch (e) {
-              // Skip invalid JSON lines (might be empty or partial)
-              continue;
+              // Skip invalid JSON (shouldn't happen with proper Ollama responses)
+              console.warn('[Ollama] Failed to parse stream line:', trimmed);
             }
           }
         } catch (error) {
