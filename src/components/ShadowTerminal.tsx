@@ -202,7 +202,6 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
             <div className="p-3 border-t border-white/10 bg-black/40 flex gap-2 font-mono text-sm shadow-2xl">
                 <span className="text-emerald-500">❯</span>
                 <span className="text-white/50">Output stream</span>
-<<<<<<< HEAD
                 {!autoScroll && (
                     <button
                         onClick={() => {
@@ -215,8 +214,6 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
                         Jump to latest
                     </button>
                 )}
-=======
->>>>>>> e3cb78bb39bfcca3635a985a031154fe492e278a
             </div>
         </div>
     );
