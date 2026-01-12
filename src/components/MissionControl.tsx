@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useMachine } from '@xstate/react';
+import type { SnapshotFrom } from 'xstate';
 import { ReviewGate } from './ReviewGate';
 import { AgentWorkspace } from './AgentWorkspace';
 import { ActionCardProps, RuntimeEvent } from '@/types';
@@ -16,16 +17,30 @@ import { AgentSelector } from './AgentSelector';
 import { ProjectTodos } from './ProjectTodos';
 import { StatusBar } from './StatusBar';
 
-// Define explicit types to avoid 'any'
-interface MissionSnapshot {
+type MissionPersistedSnapshot = {
+    status: string;
     value: string | Record<string, string>;
     context: {
         runId: string;
         agentId: string | null;
         error: string | null;
     };
-    matches: (stateValue: string | Record<string, unknown>) => boolean;
-}
+    children?: Record<string, unknown>;
+    historyValue?: Record<string, unknown>;
+    tags?: string[];
+    output?: unknown;
+    error?: unknown;
+};
+
+const isPersistedSnapshot = (value: unknown): value is MissionPersistedSnapshot => {
+    if (!value || typeof value !== 'object') return false;
+    const record = value as Record<string, unknown>;
+    return (
+        typeof record.status === 'string' &&
+        'value' in record &&
+        'context' in record
+    );
+};
 
 const phases = [
     { id: 'plan', label: 'PLAN', color: 'var(--sapphire)', icon: LayoutGrid },
@@ -43,7 +58,7 @@ const PHASE_MAP: Record<string, 'plan' | 'build' | 'review' | 'deploy'> = {
 };
 
 export function MissionControl() {
-    const [initialSnapshot, setInitialSnapshot] = useState<MissionSnapshot | null>(null);
+    const [initialSnapshot, setInitialSnapshot] = useState<MissionPersistedSnapshot | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
@@ -55,9 +70,10 @@ export function MissionControl() {
                 const res = await fetch('/api/run', { signal: controller.signal });
                 if (res.ok) {
                     const data = await res.json();
-                    if (data && data.context) {
+                    const candidate = data?.snapshot ?? data?.context;
+                    if (candidate && isPersistedSnapshot(candidate)) {
                         console.log("Resuming session:", data.id);
-                        setInitialSnapshot(data.context);
+                        setInitialSnapshot(candidate);
                     }
                 }
             } catch (err) {
@@ -86,18 +102,19 @@ export function MissionControl() {
     return <MissionControlInner initialSnapshot={initialSnapshot} />;
 }
 
-function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSnapshot | null }) {
+function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPersistedSnapshot | null }) {
     // Note: Internal usage guarded by strict types now.
-    const [snapshot, send] = useMachine(missionControlMachine, {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        snapshot: initialSnapshot as any // XState hydration cast if structure differs strictly
-    });
+    const machineOptions = initialSnapshot
+        ? { snapshot: initialSnapshot as unknown as SnapshotFrom<typeof missionControlMachine> }
+        : undefined;
+    const [snapshot, send, actorRef] = useMachine(missionControlMachine, machineOptions);
     const [actions, setActions] = useState<ActionCardProps[]>([]);
     const [leftPanelOpen, setLeftPanelOpen] = useState(true);
     const [rightPanelOpen, setRightPanelOpen] = useState(true);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState(false);
     const [activeAgentId, setActiveAgentId] = useState('architect');
+    const sessionStartRef = useRef(Date.now());
 
     // Command Palette Logic
     useEffect(() => {
@@ -110,6 +127,11 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSna
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
+
+    useEffect(() => {
+        sessionStartRef.current = Date.now();
+        setActions([]);
+    }, [snapshot.context.runId]);
 
     const handleCommand = (cmdId: string) => {
         switch (cmdId) {
@@ -140,12 +162,13 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSna
 
         const saveState = async () => {
             try {
+                const persisted = actorRef.getPersistedSnapshot();
                 await fetch('/api/run', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         id: snapshot.context.runId,
-                        context: snapshot, // Saving FULL snapshot
+                        snapshot: persisted,
                         status: typeof snapshot.value === 'string' ? snapshot.value : JSON.stringify(snapshot.value)
                     })
                 });
@@ -157,7 +180,7 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSna
         // Debounce simple save
         const timer = setTimeout(saveState, 1000);
         return () => clearTimeout(timer);
-    }, [snapshot]);
+    }, [snapshot, actorRef]);
 
     // Poll for events from SQLite "Task Ledger"
     useEffect(() => {
@@ -166,9 +189,16 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSna
                 const res = await fetch(`/api/events?runId=${snapshot.context.runId}`);
                 if (res.ok) {
                     const data = await res.json();
+                    const filteredEvents = (data as RuntimeEvent[]).filter((event) => {
+                        if (event.type === 'OLLAMA_BIT') return false;
+                        if (event.type === 'OLLAMA_CHAT_STARTED') return false;
+                        const timestamp = event.header?.timestamp;
+                        if (typeof timestamp !== 'number') return false;
+                        return timestamp >= sessionStartRef.current;
+                    });
                     
                      // Map RuntimeEvent to ActionCardProps for the UI
-                    const mappedEvents = data.map((event: RuntimeEvent, index: number) => {
+                    const mappedEvents: ActionCardProps[] = filteredEvents.map((event: RuntimeEvent, index: number): ActionCardProps => {
                         const base = {
                             id: `${snapshot.context.runId}-${index}`,
                             runId: snapshot.context.runId,
@@ -184,9 +214,15 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSna
                             case 'STDERR_CHUNK':
                                 return { ...base, type: 'error' as const, content: event.content, title: 'STDERR', severity: 'error' as const };
                             case 'WORKFLOW_ERROR':
-                                return { ...base, type: 'error' as const, title: 'Error', content: event.error, severity: event.severity };
+                                return {
+                                    ...base,
+                                    type: 'error' as const,
+                                    title: 'Error',
+                                    content: event.error,
+                                    severity: event.severity === 'fatal' ? 'error' : 'warn'
+                                };
                             case 'OLLAMA_CHAT_COMPLETED':
-                                return { ...base, type: 'log' as const, title: 'Ollama Chat', content: event.response.message.content };
+                                return { ...base, type: 'code' as const, title: 'Qwen', content: event.response.message.content, agentId: 'QWEN' };
                             case 'OLLAMA_ERROR':
                                 return { ...base, type: 'error' as const, title: 'Ollama Error', content: event.error, severity: 'error' as const };
                             case 'PROCESS_STARTED':

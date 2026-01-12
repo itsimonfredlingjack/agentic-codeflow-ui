@@ -2,14 +2,14 @@
 
 ## Översikt
 
-Ollama-integrationen gör det möjligt för GPT 5.2 att interagera med lokala AI-modeller (som `starcoder2:3b`) via backend och frontend i projektet.
+Ollama-integrationen gör det möjligt för GPT 5.2 att interagera med lokala AI-modeller (som `qwen2.5-coder:3b`) via backend och frontend i projektet.
 
 ## Konfiguration
 
 ### Förutsättningar
 
 1. **Ollama måste köra** på `http://localhost:11434` (standard)
-2. **starcoder2:3b måste vara installerad**: `ollama pull starcoder2:3b`
+2. **qwen2.5-coder:3b måste vara installerad**: `ollama pull qwen2.5-coder:3b`
 
 ### Miljövariabler
 
@@ -52,7 +52,7 @@ Generera text eller chatta med Ollama-modeller.
 ```json
 {
   "action": "generate",
-  "model": "starcoder2:3b",
+  "model": "qwen2.5-coder:3b",
   "prompt": "Write a Python function to calculate fibonacci",
   "options": {
     "temperature": 0.7,
@@ -65,7 +65,7 @@ Generera text eller chatta med Ollama-modeller.
 ```json
 {
   "action": "chat",
-  "model": "starcoder2:3b",
+  "model": "qwen2.5-coder:3b",
   "messages": [
     { "role": "user", "content": "Hello, can you help me write code?" }
   ],
@@ -97,7 +97,7 @@ import { agencyClient } from '@/lib/client';
 // Generate text
 await agencyClient.send({
   type: 'INTENT_OLLAMA_GENERATE',
-  model: 'starcoder2:3b',
+  model: 'qwen2.5-coder:3b',
   prompt: 'Write a Python function to reverse a string',
   options: { temperature: 0.7 }
 });
@@ -105,7 +105,7 @@ await agencyClient.send({
 // Chat
 await agencyClient.send({
   type: 'INTENT_OLLAMA_CHAT',
-  model: 'starcoder2:3b',
+  model: 'qwen2.5-coder:3b',
   messages: [
     { role: 'user', content: 'Hello!' }
   ]
@@ -120,14 +120,14 @@ import { callOllama, listOllamaModels, checkOllamaHealth } from '@/lib/ollamaCli
 // Generate
 const response = await callOllama({
   action: 'generate',
-  model: 'starcoder2:3b',
+  model: 'qwen2.5-coder:3b',
   prompt: 'Write a Python function',
 });
 
 // Chat
 const chatResponse = await callOllama({
   action: 'chat',
-  model: 'starcoder2:3b',
+  model: 'qwen2.5-coder:3b',
   messages: [
     { role: 'user', content: 'Hello!' }
   ],
@@ -149,7 +149,7 @@ När du använder event-driven approach (via `agencyClient.send`), kommer du att
 {
   type: 'OLLAMA_RESPONSE',
   header: { ... },
-  model: 'starcoder2:3b',
+  model: 'qwen2.5-coder:3b',
   response: 'Generated code here...',
   metadata: {
     total_duration: 1234,
@@ -171,7 +171,7 @@ När du använder event-driven approach (via `agencyClient.send`), kommer du att
 
 ## Standardmodell
 
-Om ingen modell anges, används **starcoder2:3b** som standard (perfekt för 6GB VRAM).
+Om ingen modell anges, används **qwen2.5-coder:3b** som standard (perfekt för 6GB VRAM).
 
 ## Exempel: Använda från React Component
 
@@ -190,7 +190,7 @@ export function CodeGenerator() {
     try {
       const response = await callOllama({
         action: 'generate',
-        model: 'starcoder2:3b',
+  model: 'qwen2.5-coder:3b',
         prompt: 'Write a Python function to sort a list',
       });
       
@@ -231,9 +231,9 @@ Kontrollera att modellen är installerad:
 ollama list
 ```
 
-Om `starcoder2:3b` saknas:
+Om `qwen2.5-coder:3b` saknas:
 ```bash
-ollama pull starcoder2:3b
+ollama pull qwen2.5-coder:3b
 ```
 
 ### CORS-problem
@@ -243,4 +243,4 @@ Ollama API körs lokalt, så CORS bör inte vara ett problem. Om du ändå får 
 ## Ytterligare information
 
 - Ollama API dokumentation: https://github.com/ollama/ollama/blob/main/docs/api.md
-- starcoder2:3b är optimerad för kodgenerering och passar perfekt i 6GB VRAM
+- qwen2.5-coder:3b är optimerad för kodgenerering och passar perfekt i 6GB VRAM

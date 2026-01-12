@@ -41,6 +41,8 @@ export interface OllamaChatResponse {
   eval_duration?: number;
 }
 
+export type OllamaStreamKind = 'chat' | 'generate';
+
 // --- Agent Intents (UI -> Host) ---
 export type AgentIntent =
   | { type: 'INTENT_START_BUILD'; header: MessageHeader; blueprint?: Record<string, unknown> }
@@ -63,9 +65,10 @@ export type RuntimeEvent =
   | { type: 'PERMISSION_REQUESTED'; header: MessageHeader; requestId: string; command: string; riskLevel: 'high' }
   | { type: 'STATE_SNAPSHOT_SAVED'; header: MessageHeader; stateValue: string }
   | { type: 'WORKFLOW_ERROR'; header: MessageHeader; error: string; severity: 'warn' | 'fatal' }
-   | { type: 'OLLAMA_RESPONSE'; header: MessageHeader; model: string; response: string; metadata?: Record<string, unknown> }
+  | { type: 'OLLAMA_RESPONSE'; header: MessageHeader; model: string; response: string; metadata?: Record<string, unknown> }
   | { type: 'OLLAMA_ERROR'; header: MessageHeader; error: string; model?: string }
   | { type: 'OLLAMA_CHAT_STARTED'; header: MessageHeader; model?: string }
+  | { type: 'OLLAMA_BIT'; header: MessageHeader; kind: OllamaStreamKind; model?: string; delta: string; done: boolean }
   | { type: 'OLLAMA_CHAT_COMPLETED'; header: MessageHeader; response: OllamaChatResponse }
   | { type: 'OLLAMA_CHAT_FAILED'; header: MessageHeader; model?: string; error: string };
 

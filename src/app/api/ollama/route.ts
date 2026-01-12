@@ -8,6 +8,13 @@ export const dynamic = 'force-dynamic';
 const VALID_ROLES: OllamaChatRole[] = ['system', 'user', 'assistant'];
 
 /**
+ * Type guard for OllamaHttpError with statusCode
+ */
+function isHttpErrorWithStatus(error: unknown): error is OllamaHttpError & { statusCode: number } {
+  return error instanceof OllamaHttpError && typeof (error as OllamaHttpError).statusCode === 'number';
+}
+
+/**
  * Validate chat messages structure
  */
 function validateMessages(messages: unknown): messages is OllamaChatMessage[] {
@@ -143,7 +150,7 @@ export async function POST(request: NextRequest) {
        );
      }
 
-     if (error instanceof OllamaHttpError) {
+     if (isHttpErrorWithStatus(error)) {
        // Map HTTP errors to appropriate status codes
        const status = error.statusCode >= 400 && error.statusCode < 500 
          ? error.statusCode 
@@ -214,7 +221,7 @@ export async function GET(request: NextRequest) {
        );
      }
 
-     if (error instanceof OllamaHttpError) {
+     if (isHttpErrorWithStatus(error)) {
        // Map HTTP errors to appropriate status codes
        const status = error.statusCode >= 400 && error.statusCode < 500 
          ? error.statusCode 

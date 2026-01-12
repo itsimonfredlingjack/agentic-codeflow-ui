@@ -1,10 +1,10 @@
 // src/lib/runtime.ts
 import { Subject } from 'rxjs';
 import { v4 as uuidv4 } from 'uuid';
-import { AgentIntent, RuntimeEvent, MessageHeader, OllamaChatResponse } from '@/types';
+import { AgentIntent, RuntimeEvent, MessageHeader, OllamaChatMessage, OllamaChatResponse } from '@/types';
 import { ledger } from './ledger';
 import { TerminalService } from './terminal';
-import { ollamaClient } from './ollama';
+import { ollamaClient as ollamaService } from './ollama';
 
 export class HostRuntime {
   private eventStream = new Subject<RuntimeEvent>();
@@ -57,8 +57,8 @@ export class HostRuntime {
 
   private async handleOllamaGenerate(intent: Extract<AgentIntent, { type: 'INTENT_OLLAMA_GENERATE' }>) {
     try {
-      const response = await ollamaClient.generate({
-        model: intent.model, // Will use default from ollamaClient if undefined
+      const response = await ollamaService.generate({
+        model: intent.model, // Will use default from ollamaService if undefined
         prompt: intent.prompt,
         stream: false,
         options: intent.options || {},
@@ -88,7 +88,7 @@ export class HostRuntime {
   }
 
   private async handleOllamaChat(intent: Extract<AgentIntent, { type: 'INTENT_OLLAMA_CHAT' }>) {
-    const model = intent.model; // Will use default from ollamaClient if undefined
+    const model = intent.model; // Will use default from ollamaService if undefined
     
     // Emit started event
     this.emit({
@@ -98,31 +98,103 @@ export class HostRuntime {
     });
 
     try {
-      const response = await ollamaClient.chat({
-        model: intent.model, // Will use default from ollamaClient if undefined
+      const stream = await ollamaService.chatStream({
+        model: intent.model, // Will use default from ollamaService if undefined
         messages: intent.messages,
-        stream: false,
+        stream: true,
         options: intent.options || {},
       });
 
-      // Convert to OllamaChatResponse format
-      const chatResponse: OllamaChatResponse = {
-        model: response.model,
-        created_at: response.created_at,
-        message: response.message,
-        done: response.done,
-        total_duration: response.total_duration,
-        load_duration: response.load_duration,
-        prompt_eval_count: response.prompt_eval_count,
-        eval_count: response.eval_count,
-        eval_duration: response.eval_duration,
-      };
+      const reader = stream.getReader();
+      let aggregatedContent = '';
+      let lastChunk: OllamaChatResponse | null = null;
+      let streamError: Error | null = null;
 
-      // Emit completed event
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!value) continue;
+
+          lastChunk = value;
+          const delta = value.message?.content ?? '';
+          if (delta) {
+            aggregatedContent += delta;
+          }
+
+          this.emit({
+            type: 'OLLAMA_BIT',
+            header: intent.header,
+            kind: 'chat',
+            model: value.model || model,
+            delta,
+            done: value.done,
+          });
+
+          if (value.done) {
+            break;
+          }
+        }
+      } catch (error) {
+        streamError = error instanceof Error ? error : new Error('Stream read error');
+      } finally {
+        await reader.cancel().catch(() => undefined);
+      }
+
+      if (streamError && aggregatedContent.trim()) {
+        this.emit({
+          type: 'OLLAMA_CHAT_COMPLETED',
+          header: intent.header,
+          response: this.buildChatResponse(model, lastChunk, aggregatedContent),
+        });
+        return;
+      }
+
+      if (streamError) {
+        throw streamError;
+      }
+
+      if (!lastChunk) {
+        this.emit({
+          type: 'OLLAMA_CHAT_FAILED',
+          header: intent.header,
+          model,
+          error: 'No response from Ollama',
+        });
+        return;
+      }
+
+      if (!aggregatedContent.trim()) {
+        const fallbackPrompt = this.buildChatPrompt(intent.messages);
+        const fallbackResponse = await ollamaService.generate({
+          model: intent.model,
+          prompt: fallbackPrompt,
+          stream: false,
+          options: intent.options || {},
+        });
+
+        this.emit({
+          type: 'OLLAMA_CHAT_COMPLETED',
+          header: intent.header,
+          response: {
+            model: fallbackResponse.model,
+            created_at: fallbackResponse.created_at,
+            message: { role: 'assistant', content: fallbackResponse.response },
+            done: true,
+            total_duration: fallbackResponse.total_duration,
+            load_duration: fallbackResponse.load_duration,
+            prompt_eval_count: fallbackResponse.prompt_eval_count,
+            eval_count: fallbackResponse.eval_count,
+            eval_duration: fallbackResponse.eval_duration,
+          },
+        });
+        return;
+      }
+
       this.emit({
         type: 'OLLAMA_CHAT_COMPLETED',
         header: intent.header,
-        response: chatResponse,
+        response: this.buildChatResponse(model, lastChunk, aggregatedContent),
       });
     } catch (error: any) {
       // Emit failed event
@@ -136,8 +208,53 @@ export class HostRuntime {
   }
 
   private emit(event: RuntimeEvent) {
-    ledger.appendEvent(this.activeRunId, event);
+    if (event.type !== 'OLLAMA_BIT') {
+      ledger.appendEvent(this.activeRunId, event);
+    }
     this.eventStream.next(event);
+  }
+
+  private buildChatResponse(
+    model: string | undefined,
+    lastChunk: OllamaChatResponse | null,
+    aggregatedContent: string
+  ): OllamaChatResponse {
+    const safeModel = lastChunk?.model || model || 'unknown';
+    const safeMessage = lastChunk?.message ?? { role: 'assistant', content: '' };
+
+    return {
+      model: safeModel,
+      created_at: lastChunk?.created_at || new Date().toISOString(),
+      message: {
+        ...safeMessage,
+        content: aggregatedContent || safeMessage.content || '',
+      },
+      done: true,
+      total_duration: lastChunk?.total_duration,
+      load_duration: lastChunk?.load_duration,
+      prompt_eval_count: lastChunk?.prompt_eval_count,
+      eval_count: lastChunk?.eval_count,
+      eval_duration: lastChunk?.eval_duration,
+    };
+  }
+
+  private buildChatPrompt(messages: OllamaChatMessage[]): string {
+    const parts = messages.map((message) => {
+      const label = message.role === 'system' ? 'System' : message.role === 'user' ? 'User' : 'Assistant';
+      return `${label}: ${message.content}`;
+    });
+
+    let prompt = parts.join('\n\n');
+    if (!prompt.trim()) {
+      return 'Assistant:';
+    }
+
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== 'assistant') {
+      prompt += '\n\nAssistant:';
+    }
+
+    return prompt;
   }
 
   private createHeader(): MessageHeader {

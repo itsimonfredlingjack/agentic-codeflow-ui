@@ -65,6 +65,13 @@ class TaskLedger {
         timestamp INTEGER
       );
     `);
+
+    const runColumns = this.db.prepare('PRAGMA table_info(runs)').all() as { name: string }[];
+    const hasCreatedAt = runColumns.some(column => column.name === 'created_at');
+    if (!hasCreatedAt) {
+      this.db.exec('ALTER TABLE runs ADD COLUMN created_at INTEGER');
+      this.db.exec('UPDATE runs SET created_at = unixepoch() WHERE created_at IS NULL');
+    }
   }
 
   public appendEvent(runId: string, event: RuntimeEvent) {
@@ -122,8 +129,8 @@ class TaskLedger {
       }
       return;
     }
-    const stmt = this.db.prepare('INSERT OR IGNORE INTO runs (id) VALUES (?)');
-    stmt.run(runId);
+    const stmt = this.db.prepare('INSERT OR IGNORE INTO runs (id, created_at) VALUES (?, ?)');
+    stmt.run(runId, Math.floor(Date.now() / 1000));
   }
 
   public getLatestRunId(): string | null {

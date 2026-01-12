@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Send, Sparkles, Terminal, CheckCircle, ShieldAlert } from 'lucide-react';
 import clsx from 'clsx';
 import type { ActionCardProps, OllamaChatMessage, AgentIntent } from '@/types';
@@ -43,20 +43,33 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
     const [inputValue, setInputValue] = useState('');
     const [localStream, setLocalStream] = useState<StreamItem[]>(initialStream);
     const [chatHistory, setChatHistory] = useState<OllamaChatMessage[]>([{ role: 'system', content: DEFAULT_SYSTEM_PROMPT }]);
+    const hasHydratedStream = useRef(false);
 
     const { lastEvent, client } = useAgencyClient(runId);
 
-    // Sync initial stream if it changes (e.g. initial load)
+    // Reset local state when run changes
     useEffect(() => {
-        if (initialStream.length > 0) {
-             // Basic de-duplication could go here
-             setLocalStream(initialStream);
-        }
+        hasHydratedStream.current = false;
+        setLocalStream([]);
+        setChatHistory([{ role: 'system', content: DEFAULT_SYSTEM_PROMPT }]);
+    }, [runId]);
+
+    // Hydrate stream once per run (avoid clobbering optimistic UI)
+    useEffect(() => {
+        if (hasHydratedStream.current) return;
+        if (initialStream.length === 0) return;
+        setLocalStream((prev) => (prev.length === 0 ? initialStream : prev));
+        hasHydratedStream.current = true;
     }, [initialStream]);
 
     // Handle Real-time Events
     useEffect(() => {
         if (!lastEvent) return;
+
+        if (lastEvent.type === 'OLLAMA_BIT') return;
+
+        const correlationId = lastEvent.header.correlationId;
+        const typingId = `typing-${correlationId}`;
 
         const item: StreamItem = {
             id: `evt-${Date.now()}-${Math.random()}`,
@@ -106,14 +119,31 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                 item.severity = lastEvent.severity === 'fatal' ? 'error' : 'warn';
                 break;
             case 'OLLAMA_CHAT_STARTED':
-                item.type = 'log';
-                item.title = 'Ollama Chat Started';
-                item.content = `Starting chat with model ${lastEvent.model || 'default'}`;
-                break;
+                setLocalStream((prev) => {
+                    const withoutTyping = prev.filter((x) => x.id !== typingId);
+                    return [
+                        ...withoutTyping,
+                        {
+                            id: typingId,
+                            runId,
+                            type: 'log',
+                            title: 'Qwen',
+                            content: 'Thinking…',
+                            timestamp: new Date(lastEvent.header.timestamp).toLocaleTimeString(),
+                            phase: currentPhase,
+                            agentId: 'QWEN',
+                            severity: 'info',
+                            isTyping: true,
+                        },
+                    ];
+                });
+                return;
             case 'OLLAMA_CHAT_COMPLETED':
                 item.type = 'code';
-                item.title = 'Ollama Response';
+                item.title = 'Qwen';
                 item.content = lastEvent.response.message.content;
+                item.agentId = 'QWEN';
+                setLocalStream((prev) => prev.filter((x) => x.id !== typingId));
                 // append assistant message to history
                 setChatHistory(prev => capChatHistory([...prev, { role: 'assistant', content: lastEvent.response.message.content }]));
                 break;
@@ -122,12 +152,14 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                 item.title = 'Ollama Chat Failed';
                 item.content = lastEvent.error;
                 item.severity = 'error';
+                setLocalStream((prev) => prev.filter((x) => x.id !== typingId));
                 break;
             case 'OLLAMA_ERROR':
                 item.type = 'error';
                 item.title = 'Ollama Error';
                 item.content = lastEvent.error;
                 item.severity = 'error';
+                setLocalStream((prev) => prev.filter((x) => x.id !== typingId));
                 break;
             case 'SYS_READY':
                 item.type = 'log';
@@ -143,46 +175,50 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
 
     const handleSend = async () => {
         if (!inputValue.trim()) return;
+        
+        const trimmed = inputValue.trim();
+        let mode: 'chat' | 'command' = 'command';
+        let payload = trimmed;
 
-        if (inputValue.startsWith('/llm')) {
-            const prompt = inputValue.slice(4).trim(); // remove '/llm'
-            if (!prompt) {
-                // add local error
-                const errorItem: StreamItem = {
-                    id: `error-${Date.now()}`,
-                    runId,
-                    type: 'error',
-                    title: 'Invalid Command',
-                    content: 'Usage: /llm <prompt>',
-                    timestamp: new Date().toLocaleTimeString(),
-                    phase: currentPhase,
-                    agentId: 'SYSTEM',
-                    severity: 'error'
-                };
-                setLocalStream(prev => [...prev, errorItem]);
-                setInputValue('');
-                return;
+        // 1. Determine Mode & Payload
+        if (trimmed.startsWith('/llm ') || trimmed.startsWith('/chat ')) {
+            mode = 'chat';
+            payload = trimmed.replace(/^(\/llm|\/chat)\s+/, '');
+        } else if (trimmed.startsWith('/exec ') || trimmed.startsWith('/cmd ')) {
+            mode = 'command';
+            payload = trimmed.replace(/^(\/exec|\/cmd)\s+/, '');
+        } else {
+            // Context-aware defaults
+            if (currentPhase === 'plan' || currentPhase === 'review') {
+                mode = 'chat';
+            } else {
+                mode = 'command';
             }
-            // optimistic user msg
-            const userMsg: StreamItem = {
-                id: Date.now().toString(),
-                runId,
-                type: 'log',
-                title: 'User Input',
-                content: inputValue,
-                timestamp: new Date().toLocaleTimeString(),
-                phase: currentPhase,
-                agentId: 'USER',
-                severity: 'info',
-                isUser: true
-            };
-            setLocalStream(prev => [...prev, userMsg]);
+        }
 
-            // compute next history synchronously and send that
-            const nextHistory = capChatHistory([...chatHistory, { role: 'user', content: prompt }]);
+        if (!payload) return;
+
+        // 2. Optimistic UI Update
+        const userMsg: StreamItem = {
+            id: Date.now().toString(),
+            runId,
+            type: 'log',
+            title: mode === 'chat' ? 'User Prompt' : 'User Command',
+            content: payload,
+            timestamp: new Date().toLocaleTimeString(),
+            phase: currentPhase,
+            agentId: 'USER',
+            severity: 'info',
+            isUser: true
+        };
+        setLocalStream(prev => [...prev, userMsg]);
+        setInputValue('');
+
+        // 3. Dispatch Logic
+        if (mode === 'chat') {
+            const nextHistory = capChatHistory([...chatHistory, { role: 'user', content: payload }]);
             setChatHistory(nextHistory);
 
-            // send intent
             if (client) {
                 const intent: OllamaChatIntent = {
                     type: 'INTENT_OLLAMA_CHAT',
@@ -205,29 +241,12 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                     setLocalStream(prev => [...prev, errorItem]);
                 }
             }
-            setInputValue('');
         } else {
-            // Optimistic update
-            const userMsg: StreamItem = {
-                id: Date.now().toString(),
-                runId,
-                type: 'log',
-                title: 'User Input',
-                content: inputValue,
-                timestamp: new Date().toLocaleTimeString(),
-                phase: currentPhase,
-                agentId: 'USER',
-                severity: 'info',
-                isUser: true
-            };
-            setLocalStream(prev => [...prev, userMsg]);
-
-            // Send via Client (if connected) or fallback to prop
-            const trimmed = inputValue.trim();
+            // Command Mode
             if (client) {
                 const intent: ExecCmdIntent = {
                     type: 'INTENT_EXEC_CMD',
-                    command: trimmed
+                    command: payload
                 };
                 try {
                     await client.send(intent);
@@ -246,10 +265,8 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                     setLocalStream(prev => [...prev, errorItem]);
                 }
             } else {
-                onSendMessage(trimmed);
+                onSendMessage(payload);
             }
-
-            setInputValue('');
         }
     };
 

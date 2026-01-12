@@ -4,7 +4,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { ActionCard } from './ActionCard';
 import { ActionCardProps } from '@/types';
 import { AnimatePresence } from 'framer-motion';
-import { List, CreditCard, Filter, Search } from 'lucide-react';
+import { List, CreditCard, Filter, Search, ArrowDown } from 'lucide-react';
 import clsx from 'clsx';
 
 interface ShadowTerminalProps {
@@ -12,11 +12,15 @@ interface ShadowTerminalProps {
 }
 
 type ViewMode = 'cards' | 'raw';
+type StreamTab = 'chat' | 'logs';
 
 export function ShadowTerminal({ actions }: ShadowTerminalProps) {
     const bottomRef = useRef<HTMLDivElement>(null);
+    const scrollRef = useRef<HTMLDivElement>(null);
     const [viewMode, setViewMode] = useState<ViewMode>('cards');
+    const [tab, setTab] = useState<StreamTab>('chat');
     const [autoScroll, setAutoScroll] = useState(true);
+    const SCROLL_BOTTOM_THRESHOLD_PX = 24;
 
     // Power Tools (v3.0)
     const [filterErrors, setFilterErrors] = useState(false);
@@ -24,6 +28,9 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
 
     // Apply filters
     const visibleActions = actions.filter(a => {
+        const isChat = (a.agentId === 'USER' || a.agentId === 'QWEN') && a.type !== 'command';
+        if (tab === 'chat' && !isChat) return false;
+        if (tab === 'logs' && isChat) return false;
         if (filterErrors && a.type !== 'error') return false;
         if (searchQuery) {
             const query = searchQuery.toLowerCase();
@@ -33,25 +40,62 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
     });
 
     useEffect(() => {
-        if (autoScroll) {
-            bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-        }
-    }, [visibleActions, autoScroll, viewMode]);
+        if (!autoScroll) return;
+
+        const raf = requestAnimationFrame(() => {
+            bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        });
+
+        return () => cancelAnimationFrame(raf);
+    }, [visibleActions.length, autoScroll, viewMode, tab]);
 
     return (
-        <div className="glass-panel w-full h-full rounded-xl flex flex-col overflow-hidden relative" role="region" aria-label="Shadow Terminal Output">
+        <div
+            className="w-full h-full rounded-xl flex flex-col overflow-hidden relative border border-white/10 bg-[#050505]"
+            role="region"
+            aria-label="Shadow Terminal Output"
+            style={{
+                // Tuned default sizes (can be made configurable later)
+                ['--terminal-font-size' as unknown as keyof React.CSSProperties]: '14.5px',
+                ['--terminal-code-font-size' as unknown as keyof React.CSSProperties]: '13px',
+            }}
+        >
             {/* Header / Toolbar */}
-            <div className="h-12 border-b border-white/10 flex items-center px-4 justify-between bg-black/20 backdrop-blur-md z-10 gap-4">
+            <div className="h-12 border-b border-white/10 flex items-center px-4 justify-between bg-black/40 z-10 gap-4">
                 <div className="flex items-center gap-4 flex-1">
+                    {/* Tabs */}
+                    <div className="flex items-center bg-black/30 rounded-lg p-1 gap-1 border border-white/10">
+                        <button
+                            onClick={() => setTab('chat')}
+                            className={clsx(
+                                "px-2 py-1 rounded text-xs font-mono transition-colors",
+                                tab === 'chat' ? "bg-white/10 text-white" : "text-white/40 hover:text-white/80"
+                            )}
+                            aria-pressed={tab === 'chat'}
+                        >
+                            Chat
+                        </button>
+                        <button
+                            onClick={() => setTab('logs')}
+                            className={clsx(
+                                "px-2 py-1 rounded text-xs font-mono transition-colors",
+                                tab === 'logs' ? "bg-white/10 text-white" : "text-white/40 hover:text-white/80"
+                            )}
+                            aria-pressed={tab === 'logs'}
+                        >
+                            Logs
+                        </button>
+                    </div>
+
                     {/* Search Bar */}
                     <div className="relative group flex-1 max-w-xs">
                         <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-white/30 group-focus-within:text-white/70 transition-colors" />
                         <input
                             type="text"
-                            placeholder="Search logs..."
+                            placeholder={tab === 'chat' ? 'Search chat...' : 'Search logs...'}
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full bg-black/20 border border-white/5 rounded text-xs py-1.5 pl-7 pr-2 text-white placeholder-white/20 focus:outline-none focus:bg-black/40 focus:border-white/10 transition-all font-mono"
+                            className="w-full bg-black/30 border border-white/10 rounded text-xs py-1.5 pl-7 pr-2 text-white placeholder-white/20 focus:outline-none focus:bg-black/40 focus:border-white/20 transition-all font-mono"
                         />
                     </div>
 
@@ -70,7 +114,7 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
 
                 <div className="flex items-center gap-4">
                     {/* View Toggle */}
-                    <div className="flex items-center bg-black/30 rounded-lg p-1 gap-1 border border-white/5">
+                    <div className="flex items-center bg-black/30 rounded-lg p-1 gap-1 border border-white/10">
                         <button
                             onClick={() => setViewMode('cards')}
                             className={clsx(
@@ -94,21 +138,22 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
                             <List size={14} />
                         </button>
                     </div>
-                    <div className="text-xs font-mono text-white/40 hidden md:block">SHADOW TERMINAL v3.0</div>
+                    <div className="text-xs font-mono text-white/40 hidden md:block">TERMINAL</div>
                 </div>
             </div>
 
             {/* Content Area */}
             <div
-                className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth"
+                ref={scrollRef}
+                className="flex-1 overflow-y-auto p-4 scroll-smooth"
                 onScroll={(e) => {
-                    const bottom = e.currentTarget.scrollHeight - e.currentTarget.scrollTop === e.currentTarget.clientHeight;
-                    if (bottom) setAutoScroll(true);
-                    else setAutoScroll(false);
+                    const target = e.currentTarget;
+                    const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+                    setAutoScroll(distanceFromBottom < SCROLL_BOTTOM_THRESHOLD_PX);
                 }}
             >
                 {viewMode === 'cards' ? (
-                    <AnimatePresence mode='popLayout'>
+                    <AnimatePresence mode='sync'>
                         {visibleActions.map((action) => (
                             <ActionCard key={action.id} {...action} />
                         ))}
@@ -131,9 +176,21 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
             </div>
 
             {/* Input Placeholder */}
-            <div className="p-3 border-t border-white/10 bg-black/20 flex gap-2 font-mono text-sm shadow-2xl">
+            <div className="p-3 border-t border-white/10 bg-black/40 flex gap-2 font-mono text-sm shadow-2xl">
                 <span className="text-emerald-500">❯</span>
-                <span className="animate-pulse text-white/50">Listening for Agent commands...</span>
+                <span className="text-white/50">Output stream</span>
+                {!autoScroll && (
+                    <button
+                        onClick={() => {
+                            setAutoScroll(true);
+                            bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                        }}
+                        className="ml-auto inline-flex items-center gap-2 text-xs px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-white/70"
+                    >
+                        <ArrowDown size={14} />
+                        Jump to latest
+                    </button>
+                )}
             </div>
         </div>
     );

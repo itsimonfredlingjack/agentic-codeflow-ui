@@ -5,7 +5,7 @@ import type { OllamaChatRequest, OllamaChatResponse, OllamaOptions } from '@/typ
 
 // Configuration from environment variables
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
-const OLLAMA_DEFAULT_MODEL = process.env.OLLAMA_DEFAULT_MODEL || 'starcoder2:3b';
+const OLLAMA_DEFAULT_MODEL = process.env.OLLAMA_DEFAULT_MODEL || 'qwen2.5-coder:3b';
 const OLLAMA_TIMEOUT_MS = parseInt(process.env.OLLAMA_TIMEOUT_MS || '60000', 10);
 
 // ============================================================================
