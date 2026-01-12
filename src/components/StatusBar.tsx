@@ -7,10 +7,18 @@ interface StatusBarProps {
     currentPhase: string;
     eventCount: number;
     isProcessing?: boolean;
+    connectionStatus: 'connecting' | 'open' | 'error' | 'closed';
 }
 
-export function StatusBar({ currentPhase, eventCount, isProcessing }: StatusBarProps) {
+export function StatusBar({ currentPhase, eventCount, isProcessing, connectionStatus }: StatusBarProps) {
     const time = new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+    const statusMap = {
+        open: { label: 'Connected', textClass: 'text-emerald-400/80', dotClass: 'bg-emerald-500' },
+        connecting: { label: 'Connecting', textClass: 'text-amber-400/80', dotClass: 'bg-amber-400 animate-pulse' },
+        error: { label: 'Reconnecting', textClass: 'text-amber-400/80', dotClass: 'bg-amber-400 animate-pulse' },
+        closed: { label: 'Offline', textClass: 'text-rose-400/80', dotClass: 'bg-rose-500' },
+    } as const;
+    const status = statusMap[connectionStatus];
 
     return (
         <div className="h-6 bg-[#0a0a0a] border-t border-white/5 flex items-center justify-between px-4 text-[10px] font-mono text-white/40 select-none shrink-0">
@@ -54,8 +62,9 @@ export function StatusBar({ currentPhase, eventCount, isProcessing }: StatusBarP
             {/* Right: System Status */}
             <div className="flex items-center gap-4">
                 <div className="flex items-center gap-1.5">
-                    <Wifi size={10} className="text-emerald-500/60" />
-                    <span>Connected</span>
+                    <span className={`w-1.5 h-1.5 rounded-full ${status.dotClass}`} />
+                    <Wifi size={10} className={status.textClass} />
+                    <span className={status.textClass}>{status.label}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                     <Clock size={10} />

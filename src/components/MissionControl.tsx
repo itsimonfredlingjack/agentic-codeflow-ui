@@ -6,6 +6,7 @@ import type { SnapshotFrom } from 'xstate';
 import { ReviewGate } from './ReviewGate';
 import { AgentWorkspace } from './AgentWorkspace';
 import { ActionCardProps, RuntimeEvent } from '@/types';
+import { useAgencyClient } from '@/lib/client';
 import { LayoutGrid, Cpu, Shield, Zap, Activity, PanelLeft, Settings, ChevronsRight } from 'lucide-react';
 import clsx from 'clsx';
 import { missionControlMachine } from '@/machines/missionControlMachine';
@@ -115,6 +116,9 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
     const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState(false);
     const [activeAgentId, setActiveAgentId] = useState('architect');
     const sessionStartRef = useRef(Date.now());
+    const currentPhaseRef = useRef<'plan' | 'build' | 'review' | 'deploy'>('plan');
+    const lastConnectionStatusRef = useRef<'connecting' | 'open' | 'error' | 'closed' | null>(null);
+    const { lastEvent, connectionStatus } = useAgencyClient(snapshot.context.runId);
 
     // Command Palette Logic
     useEffect(() => {
@@ -131,7 +135,9 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
     useEffect(() => {
         sessionStartRef.current = Date.now();
         setActions([]);
+        lastConnectionStatusRef.current = null;
     }, [snapshot.context.runId]);
+
 
     const handleCommand = (cmdId: string) => {
         switch (cmdId) {
@@ -155,6 +161,46 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
 
     const currentPhase = (Object.keys(PHASE_MAP).find(key => matchesPhase(key)) || 'plan') as 'plan' | 'build' | 'review' | 'deploy';
     const isLockdown = snapshot.matches('security_lockdown');
+
+    useEffect(() => {
+        currentPhaseRef.current = currentPhase;
+    }, [currentPhase]);
+
+    useEffect(() => {
+        const prev = lastConnectionStatusRef.current;
+        if (prev === connectionStatus) return;
+        lastConnectionStatusRef.current = connectionStatus;
+        if (!prev) return;
+
+        let message: string | null = null;
+        let severity: 'info' | 'warn' = 'info';
+
+        if (connectionStatus === 'error') {
+            message = 'Stream lost. Reconnecting...';
+            severity = 'warn';
+        } else if (connectionStatus === 'open') {
+            message = prev === 'error' ? 'Stream reconnected.' : 'Stream connected.';
+        } else if (connectionStatus === 'closed' && prev === 'open') {
+            message = 'Stream closed.';
+            severity = 'warn';
+        }
+
+        if (!message) return;
+
+        const logItem: ActionCardProps = {
+            id: `conn-${snapshot.context.runId}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            runId: snapshot.context.runId,
+            timestamp: new Date().toLocaleTimeString(),
+            phase: currentPhaseRef.current,
+            agentId: 'SYSTEM',
+            type: 'log',
+            title: 'Stream',
+            content: message,
+            severity,
+        };
+
+        setActions((prevActions) => [...prevActions, logItem]);
+    }, [connectionStatus, snapshot.context.runId]);
 
     // Persistence Loop: Save Snapshot on Change
     useEffect(() => {
@@ -182,62 +228,69 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
         return () => clearTimeout(timer);
     }, [snapshot, actorRef]);
 
-    // Poll for events from SQLite "Task Ledger"
+    const toAction = (event: RuntimeEvent, idSuffix: string): ActionCardProps => {
+        const base = {
+            id: `${snapshot.context.runId}-${idSuffix}`,
+            runId: snapshot.context.runId,
+            timestamp: new Date(event.header.timestamp).toLocaleTimeString(),
+            phase: currentPhaseRef.current,
+            agentId: 'SYSTEM',
+            severity: 'info' as const,
+        };
+
+        switch (event.type) {
+            case 'STDOUT_CHUNK':
+                return { ...base, type: 'command' as const, content: event.content, title: 'STDOUT' };
+            case 'STDERR_CHUNK':
+                return { ...base, type: 'error' as const, content: event.content, title: 'STDERR', severity: 'error' as const };
+            case 'WORKFLOW_ERROR':
+                return {
+                    ...base,
+                    type: 'error' as const,
+                    title: 'Error',
+                    content: event.error,
+                    severity: event.severity === 'fatal' ? 'error' : 'warn'
+                };
+            case 'OLLAMA_CHAT_COMPLETED':
+                return { ...base, type: 'code' as const, title: 'Qwen', content: event.response.message.content, agentId: 'QWEN' };
+            case 'OLLAMA_ERROR':
+                return { ...base, type: 'error' as const, title: 'Ollama Error', content: event.error, severity: 'error' as const };
+            case 'PROCESS_STARTED':
+                return { ...base, type: 'log' as const, title: 'Process Started', content: `PID: ${event.pid}, Command: ${event.command}` };
+            case 'PROCESS_EXITED':
+                return { ...base, type: 'log' as const, title: 'Process Exited', content: `Exit code: ${event.code}` };
+            case 'SECURITY_VIOLATION':
+                return { ...base, type: 'error' as const, title: 'Security Violation', content: `Policy: ${event.policy}, Path: ${event.attemptedPath}`, severity: 'error' as const };
+            case 'PERMISSION_REQUESTED':
+                return { ...base, type: 'log' as const, title: 'Permission Request', content: `Command: ${event.command}, Risk: ${event.riskLevel}` };
+            default:
+                return { ...base, type: 'log' as const, title: event.type, content: JSON.stringify(event) };
+        }
+    };
+
+    // Load initial events from SQLite "Task Ledger"
     useEffect(() => {
-        const fetchEvents = async () => {
+        let isActive = true;
+
+        const fetchInitialEvents = async () => {
             try {
                 const res = await fetch(`/api/events?runId=${snapshot.context.runId}`);
-                if (res.ok) {
-                    const data = await res.json();
-                    const filteredEvents = (data as RuntimeEvent[]).filter((event) => {
-                        if (event.type === 'OLLAMA_BIT') return false;
-                        if (event.type === 'OLLAMA_CHAT_STARTED') return false;
-                        const timestamp = event.header?.timestamp;
-                        if (typeof timestamp !== 'number') return false;
-                        return timestamp >= sessionStartRef.current;
-                    });
-                    
-                     // Map RuntimeEvent to ActionCardProps for the UI
-                    const mappedEvents: ActionCardProps[] = filteredEvents.map((event: RuntimeEvent, index: number): ActionCardProps => {
-                        const base = {
-                            id: `${snapshot.context.runId}-${index}`,
-                            runId: snapshot.context.runId,
-                            timestamp: new Date(event.header.timestamp).toLocaleTimeString(),
-                            phase: currentPhase,
-                            agentId: 'SYSTEM',
-                            severity: 'info' as const,
-                        };
+                if (!res.ok) return;
 
-                        switch (event.type) {
-                            case 'STDOUT_CHUNK':
-                                return { ...base, type: 'command' as const, content: event.content, title: 'STDOUT' };
-                            case 'STDERR_CHUNK':
-                                return { ...base, type: 'error' as const, content: event.content, title: 'STDERR', severity: 'error' as const };
-                            case 'WORKFLOW_ERROR':
-                                return {
-                                    ...base,
-                                    type: 'error' as const,
-                                    title: 'Error',
-                                    content: event.error,
-                                    severity: event.severity === 'fatal' ? 'error' : 'warn'
-                                };
-                            case 'OLLAMA_CHAT_COMPLETED':
-                                return { ...base, type: 'code' as const, title: 'Qwen', content: event.response.message.content, agentId: 'QWEN' };
-                            case 'OLLAMA_ERROR':
-                                return { ...base, type: 'error' as const, title: 'Ollama Error', content: event.error, severity: 'error' as const };
-                            case 'PROCESS_STARTED':
-                                return { ...base, type: 'log' as const, title: 'Process Started', content: `PID: ${event.pid}, Command: ${event.command}` };
-                            case 'PROCESS_EXITED':
-                                return { ...base, type: 'log' as const, title: 'Process Exited', content: `Exit code: ${event.code}` };
-                            case 'SECURITY_VIOLATION':
-                                return { ...base, type: 'error' as const, title: 'Security Violation', content: `Policy: ${event.policy}, Path: ${event.attemptedPath}`, severity: 'error' as const };
-                            case 'PERMISSION_REQUESTED':
-                                return { ...base, type: 'log' as const, title: 'Permission Request', content: `Command: ${event.command}, Risk: ${event.riskLevel}` };
-                            default:
-                                return { ...base, type: 'log' as const, title: event.type, content: JSON.stringify(event) };
-                        }
-                    });
-                    
+                const data = await res.json();
+                const filteredEvents = (data as RuntimeEvent[]).filter((event) => {
+                    if (event.type === 'OLLAMA_BIT') return false;
+                    if (event.type === 'OLLAMA_CHAT_STARTED') return false;
+                    const timestamp = event.header?.timestamp;
+                    if (typeof timestamp !== 'number') return false;
+                    return timestamp >= sessionStartRef.current;
+                });
+
+                const mappedEvents: ActionCardProps[] = filteredEvents.map((event, index) =>
+                    toAction(event, `history-${index}`)
+                );
+
+                if (isActive) {
                     setActions(mappedEvents);
                 }
             } catch (err) {
@@ -245,10 +298,22 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
             }
         };
 
-        fetchEvents(); // Initial load
-        const interval = setInterval(fetchEvents, 2000); // Poll every 2s
-        return () => clearInterval(interval);
-    }, [snapshot.context.runId, currentPhase]);
+        fetchInitialEvents();
+        return () => {
+            isActive = false;
+        };
+    }, [snapshot.context.runId]);
+
+    useEffect(() => {
+        if (!lastEvent) return;
+        if (lastEvent.type === 'OLLAMA_BIT' || lastEvent.type === 'OLLAMA_CHAT_STARTED') return;
+        if (lastEvent.header?.sessionId !== snapshot.context.runId) return;
+        const timestamp = lastEvent.header?.timestamp;
+        if (typeof timestamp !== 'number' || timestamp < sessionStartRef.current) return;
+
+        const idSuffix = `live-${lastEvent.header.correlationId}-${timestamp}-${Math.random().toString(16).slice(2)}`;
+        setActions((prev) => [...prev, toAction(lastEvent, idSuffix)]);
+    }, [lastEvent, snapshot.context.runId]);
 
     // UI Input Handler - Dispatch Intents to Host
     const handleSendMessage = async (msg: string) => {
@@ -512,6 +577,7 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
                     currentPhase={currentPhase}
                     eventCount={actions.length}
                     isProcessing={false}
+                    connectionStatus={connectionStatus}
                 />
             </div>
         </div>
