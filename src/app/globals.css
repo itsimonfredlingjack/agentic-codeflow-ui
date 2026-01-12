@@ -20,6 +20,12 @@
   --glass-border: 255 255 255 0.12;
   --glass-surface: 255 255 255 0.03;
   --glass-glow: 255 255 255 0.05;
+
+  /* Transition Tokens */
+  --transition-fast: 150ms ease-out;
+  --transition-normal: 200ms ease-out;
+  --transition-slow: 300ms ease-out;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 body {
@@ -68,16 +74,29 @@ body::before {
   background: rgba(255, 255, 255, 0.2);
 }
 
+/* Base Interactive Elements - Smooth Transitions */
+button, a, [role="button"] {
+  transition: all var(--transition-fast);
+}
+
+input, textarea {
+  transition: all var(--transition-normal);
+}
+
 /* Utilities */
 .glass-panel {
   background-color: hsla(220, 20%, 4%, 0.95);
-  /* Match --background with slight transparency */
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  /* Fainter border */
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-  /* Deeper shadow */
+  transition: box-shadow var(--transition-normal),
+              border-color var(--transition-normal),
+              opacity var(--transition-normal);
+}
+
+.glass-panel:hover {
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
 .glass-card {
@@ -86,13 +105,14 @@ body::before {
   -webkit-backdrop-filter: blur(10px) saturate(150%);
   border: 1px solid rgba(var(--glass-border));
   border-radius: 12px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all var(--transition-normal);
 }
 
 .glass-card:hover {
   background-color: hsla(var(--tint-layer), 0.6);
   border-color: rgba(255, 255, 255, 0.2);
   box-shadow: 0 0 20px rgba(var(--active-aura), 0.1);
+  transform: translateY(-1px);
 }
 
 .glow-text {

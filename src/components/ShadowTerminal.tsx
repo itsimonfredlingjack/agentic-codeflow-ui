@@ -68,8 +68,10 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
                         <button
                             onClick={() => setTab('chat')}
                             className={clsx(
-                                "px-2 py-1 rounded text-xs font-mono transition-colors",
-                                tab === 'chat' ? "bg-white/10 text-white" : "text-white/40 hover:text-white/80"
+                                "px-2.5 py-1 rounded text-xs font-mono transition-all duration-fast",
+                                tab === 'chat'
+                                    ? "bg-white/10 text-white shadow-sm"
+                                    : "text-white/40 hover:text-white/80 hover:bg-white/5 active:scale-95"
                             )}
                             aria-pressed={tab === 'chat'}
                         >
@@ -78,8 +80,10 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
                         <button
                             onClick={() => setTab('logs')}
                             className={clsx(
-                                "px-2 py-1 rounded text-xs font-mono transition-colors",
-                                tab === 'logs' ? "bg-white/10 text-white" : "text-white/40 hover:text-white/80"
+                                "px-2.5 py-1 rounded text-xs font-mono transition-all duration-fast",
+                                tab === 'logs'
+                                    ? "bg-white/10 text-white shadow-sm"
+                                    : "text-white/40 hover:text-white/80 hover:bg-white/5 active:scale-95"
                             )}
                             aria-pressed={tab === 'logs'}
                         >
@@ -103,8 +107,10 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
                     <button
                         onClick={() => setFilterErrors(!filterErrors)}
                         className={clsx(
-                            "flex items-center gap-1.5 px-2 py-1.5 rounded text-xs font-mono border transition-all",
-                            filterErrors ? "bg-red-500/20 border-red-500/30 text-red-300" : "bg-transparent border-transparent text-white/40 hover:bg-white/5"
+                            "flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-mono border transition-all duration-fast active:scale-95",
+                            filterErrors
+                                ? "bg-red-500/20 border-red-500/30 text-red-300 shadow-sm"
+                                : "bg-transparent border-transparent text-white/40 hover:bg-white/5 hover:text-white/60"
                         )}
                     >
                         <Filter size={12} />
@@ -118,8 +124,10 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
                         <button
                             onClick={() => setViewMode('cards')}
                             className={clsx(
-                                "p-1.5 rounded transition-colors",
-                                viewMode === 'cards' ? "bg-white/10 text-white" : "text-white/40 hover:text-white/80"
+                                "p-1.5 rounded transition-all duration-fast",
+                                viewMode === 'cards'
+                                    ? "bg-white/10 text-white shadow-sm"
+                                    : "text-white/40 hover:text-white/80 hover:bg-white/5 active:scale-95"
                             )}
                             aria-label="Switch to Card View"
                             aria-pressed={viewMode === 'cards'}
@@ -129,8 +137,10 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
                         <button
                             onClick={() => setViewMode('raw')}
                             className={clsx(
-                                "p-1.5 rounded transition-colors",
-                                viewMode === 'raw' ? "bg-white/10 text-white" : "text-white/40 hover:text-white/80"
+                                "p-1.5 rounded transition-all duration-fast",
+                                viewMode === 'raw'
+                                    ? "bg-white/10 text-white shadow-sm"
+                                    : "text-white/40 hover:text-white/80 hover:bg-white/5 active:scale-95"
                             )}
                             aria-label="Switch to Raw View"
                             aria-pressed={viewMode === 'raw'}
@@ -185,9 +195,9 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
                             setAutoScroll(true);
                             bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
                         }}
-                        className="ml-auto inline-flex items-center gap-2 text-xs px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-white/70"
+                        className="ml-auto inline-flex items-center gap-2 text-xs px-2.5 py-1 rounded bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-all duration-fast active:scale-95"
                     >
-                        <ArrowDown size={14} />
+                        <ArrowDown size={14} className="animate-bounce" />
                         Jump to latest
                     </button>
                 )}

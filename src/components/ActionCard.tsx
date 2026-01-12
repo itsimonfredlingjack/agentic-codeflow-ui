@@ -46,11 +46,16 @@ export function ActionCard({ type, title, content, timestamp, agentId, severity,
         <motion.div
             {...animations}
             transition={{ duration: 0.12 }}
-            className={clsx("font-mono leading-relaxed text-[var(--terminal-font-size)]", isUser ? "text-emerald-100" : "text-white/80")}
+            className={clsx(
+                "font-mono leading-relaxed text-[var(--terminal-font-size)]",
+                "rounded-lg px-2 -mx-2 transition-all duration-fast",
+                "hover:bg-white/[0.02]",
+                isUser ? "text-emerald-100" : "text-white/80"
+            )}
             role="article"
             aria-label={`${type} event: ${title}`}
         >
-            <div className="grid grid-cols-[86px_72px_1fr] gap-x-3 gap-y-1 items-start py-1">
+            <div className="grid grid-cols-[86px_72px_1fr] gap-x-3 gap-y-1 items-start py-1.5">
                 <div className="text-white/30 text-[0.85em]">{timestamp}</div>
                 <div className="text-white/60 text-[0.85em]">{who}</div>
                 <div className="text-white/50">

@@ -58,9 +58,9 @@ export function ProjectTodos() {
     const progress = (completedCount / todos.length) * 100;
 
     return (
-        <div className="flex flex-col gap-3 flex-1 min-h-0 mt-2">
+        <div className="flex flex-col gap-3 h-full min-h-0">
             {/* Header with Progress */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between shrink-0">
                 <span className="text-xs font-bold text-white/40 uppercase tracking-widest">
                     Tasks
                 </span>
@@ -78,7 +78,7 @@ export function ProjectTodos() {
             </div>
 
             {/* Todo List */}
-            <div className="flex flex-col gap-1.5 overflow-y-auto flex-1 pr-1 custom-scrollbar">
+            <div className="flex flex-col gap-1.5 overflow-y-auto flex-1 min-h-0 pr-1 custom-scrollbar">
                 {todos.map((todo) => {
                     const PriorityIcon = todo.priority ? priorityConfig[todo.priority].icon : Circle;
                     const priorityStyle = todo.priority ? priorityConfig[todo.priority] : { color: 'text-white/20', bg: '' };
@@ -134,7 +134,7 @@ export function ProjectTodos() {
             </div>
 
             {/* Add Todo */}
-            <div className="flex gap-2 pt-3 border-t border-white/5">
+            <div className="flex gap-2 pt-3 border-t border-white/5 shrink-0">
                 <input
                     type="text"
                     value={newTodo}

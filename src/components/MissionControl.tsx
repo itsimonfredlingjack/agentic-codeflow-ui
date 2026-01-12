@@ -8,12 +8,12 @@ import { AgentWorkspace } from './AgentWorkspace';
 import { ActionCardProps, RuntimeEvent } from '@/types';
 import { LayoutGrid, Cpu, Shield, Zap, Activity, PanelLeft, Settings, ChevronsRight } from 'lucide-react';
 import clsx from 'clsx';
+import { motion } from 'framer-motion';
 import { missionControlMachine } from '@/machines/missionControlMachine';
 
 import { SettingsModal } from './SettingsModal';
 import { CommandPalette } from './CommandPalette';
 import { LogicVisualizer } from './LogicVisualizer';
-import { AgentSelector } from './AgentSelector';
 import { ProjectTodos } from './ProjectTodos';
 import { StatusBar } from './StatusBar';
 
@@ -110,10 +110,9 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
     const [snapshot, send, actorRef] = useMachine(missionControlMachine, machineOptions);
     const [actions, setActions] = useState<ActionCardProps[]>([]);
     const [leftPanelOpen, setLeftPanelOpen] = useState(true);
-    const [rightPanelOpen, setRightPanelOpen] = useState(true);
+    const [rightPanelOpen, setRightPanelOpen] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState(false);
-    const [activeAgentId, setActiveAgentId] = useState('architect');
     const sessionStartRef = useRef(Date.now());
 
     // Command Palette Logic
@@ -275,9 +274,10 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
     };
 
     return (
-        <div className="grid h-screen w-full text-white overflow-hidden p-4 pb-0 gap-4 transition-all duration-500 ease-in-out" style={{
-            gridTemplateColumns: `${leftPanelOpen ? '260px' : '0px'} minmax(400px, 1fr) ${rightPanelOpen ? '340px' : '0px'}`,
+        <div className="grid h-screen w-full text-white overflow-hidden p-4 pb-0 gap-4" style={{
+            gridTemplateColumns: `${leftPanelOpen ? '240px' : '0px'} minmax(500px, 1fr) ${rightPanelOpen ? '280px' : '0px'}`,
             gridTemplateRows: 'auto 1fr auto',
+            transition: 'grid-template-columns 300ms cubic-bezier(0.16, 1, 0.3, 1)',
             ...({ '--active-aura': phases.find(p => p.id === currentPhase)?.color } as React.CSSProperties)
         }}>
 
@@ -331,8 +331,6 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
                     </button>
                     <div className="h-6 w-px bg-white/10" />
                     <div className="text-xl font-bold tracking-widest text-white/90 glow-text">Agentic<span className="text-white/40">Code</span></div>
-                    <div className="h-6 w-px bg-white/10" />
-                    <div className="text-xs font-mono text-white/50">PROJECT: GLASS PIPELINE</div>
                 </div>
 
                 {/* Minimalist Phase HUD */}
@@ -354,7 +352,12 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
                                         {phase.label}
                                     </div>
                                     {isActive && (
-                                        <div className="absolute -bottom-2 left-0 right-0 h-px bg-(--active-aura) shadow-[0_0_10px_var(--active-aura)]" />
+                                        <motion.div
+                                            layoutId="phase-indicator"
+                                            className="absolute -bottom-2 left-0 right-0 h-px"
+                                            style={{ background: 'var(--active-aura)', boxShadow: '0 0 10px var(--active-aura)' }}
+                                            transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                                        />
                                     )}
                                 </div>
                             )
@@ -378,48 +381,31 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
             </header>
 
             {/* 2. Context Panel (Left) - Glassy */}
-            <aside className="glass-panel p-4 rounded-xl flex flex-col gap-4 relative">
-                <div className="flex-3 overflow-y-auto pr-1 flex flex-col gap-4 custom-scrollbar">
-                    {/* Active Run Card */}
-                    <div className="flex flex-col gap-2 border-b border-white/5 pb-4">
-                        <div className="flex items-center justify-between">
-                            <div className="text-xs font-bold text-white/40 uppercase tracking-widest">Active Run</div>
-                            <button
-                                onClick={() => {
-                                    if (confirm("New Run?")) send({ type: 'RESET_RUN' });
-                                }}
-                                className="text-[10px] bg-white/5 hover:bg-white/10 px-2 py-1 rounded text-white/60 hover:text-white transition-colors"
-                            >
-                                + NEW
-                            </button>
-                        </div>
-                        <div className="font-mono text-sm text-emerald-400">#{snapshot.context.runId}</div>
-                        <div className="text-[10px] text-white/50">Started 14:02:45</div>
+            <aside className="glass-panel p-4 rounded-xl flex flex-col gap-3 relative opacity-90 hover:opacity-100 min-h-0 overflow-hidden self-stretch">
+                {/* Active Run Card - Compact */}
+                <div className="flex items-center justify-between pb-2 border-b border-white/5 shrink-0">
+                    <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <div className="font-mono text-xs text-emerald-400">{snapshot.context.runId}</div>
                     </div>
-                    {/* Agent Selection Section */}
-                    <AgentSelector
-                        currentAgentId={activeAgentId}
-                        onSelectAgent={setActiveAgentId}
-                    />
-
-                    {/* Project Tasks */}
-                    <ProjectTodos />
+                    <button
+                        onClick={() => {
+                            if (confirm("New Run?")) send({ type: 'RESET_RUN' });
+                        }}
+                        className="text-[10px] bg-white/5 hover:bg-white/10 px-2 py-1 rounded text-white/60 hover:text-white transition-all active:scale-95"
+                    >
+                        + NEW
+                    </button>
                 </div>
 
-                <div className="flex flex-col gap-2 pt-4 border-t border-white/5">
-                    <button className="flex items-center justify-between p-3 rounded-lg hover:bg-white/5 transition-all text-white/40 hover:text-white group">
-                        <div className="flex items-center gap-3">
-                            <Activity size={16} className="group-hover:text-amber-400 transition-colors" />
-                            <span className="text-xs font-bold uppercase tracking-widest">Recent Sessions</span>
-                        </div>
-                        <ChevronsRight size={14} className="opacity-0 group-hover:opacity-100 transition-all translate-x-[-4px] group-hover:translate-x-0" />
-                    </button>
+                {/* Project Tasks - Expanded */}
+                <div className="flex-1 overflow-hidden min-h-0">
+                    <ProjectTodos />
                 </div>
             </aside>
 
-            {/* 3. Main Stage (Center - Agent Console) - SOLID */}
-            {/* Removed glass-panel class to allow AgentWorkspace to be the solid container */}
-            <main className="p-0 rounded-xl relative group flex flex-col overflow-hidden">
+            {/* 3. Main Stage (Center - Agent Console) - Elevated */}
+            <main className="p-0 rounded-xl relative group flex flex-col overflow-hidden z-10 shadow-2xl shadow-black/50 ring-1 ring-white/5">
                 {/* Unified Agent Workspace */}
                 <AgentWorkspace
                     runId={snapshot.context.runId}
@@ -446,7 +432,7 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
             </main>
 
             {/* 4. Insight Panel (Right) - Glassy */}
-            <aside className="glass-panel p-5 rounded-xl flex flex-col relative overflow-hidden gap-4">
+            <aside className="glass-panel p-5 rounded-xl flex flex-col relative overflow-hidden gap-4 opacity-90 hover:opacity-100">
                 {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                 <LogicVisualizer currentPhase={currentPhase} onTransition={(event) => send({ type: event } as any)} />
                 <div className="h-px bg-white/5 w-full my-2" />

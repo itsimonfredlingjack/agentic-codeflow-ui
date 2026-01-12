@@ -318,14 +318,9 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                     <div className="relative scale-75 origin-left">
                         <AIAvatar phase={currentPhase} isProcessing={localStream.some(s => s.isTyping)} />
                     </div>
-                    <div className="flex flex-col">
-                        <div className={clsx("text-sm font-bold tracking-widest flex items-center gap-2", config.accent)}>
-                            <RoleIcon size={14} />
-                            <span style={{ textShadow: '0 0 10px currentColor' }}>AI_{config.label}</span>
-                        </div>
-                        <div className="text-[10px] text-white/40 tracking-wider">
-                            SESSION ID: <span className="text-white/60">{runId.slice(0, 8)}</span> • EVENTS: {localStream.length}
-                        </div>
+                    <div className={clsx("text-sm font-bold tracking-widest flex items-center gap-2", config.accent)}>
+                        <RoleIcon size={14} />
+                        <span style={{ textShadow: '0 0 10px currentColor' }}>AI_{config.label}</span>
                     </div>
                 </div>
                 <div className="flex items-center gap-2 text-[10px] text-white/20">
@@ -348,39 +343,44 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
             {/* Omnibar Input */}
             <div className="p-4 shrink-0 z-20 bg-[#050505] border-t border-white/10">
                 <div className={clsx(
-                    "relative group flex items-stretch overflow-hidden",
-                    // Removed background, just border and glowing text
+                    "relative group flex items-stretch overflow-hidden rounded-xl",
+                    "border border-white/10 transition-all duration-200",
+                    "focus-within:border-white/20 focus-within:bg-black/40",
+                    "focus-within:shadow-[0_0_20px_rgba(255,255,255,0.05)]"
                 )}>
                     {/* Prefix Icon */}
-                    <div className="w-8 flex items-start pt-3 justify-center text-white/30">
+                    <div className="w-10 flex items-start pt-3 justify-center text-white/30 group-focus-within:text-white/50 transition-colors">
                         <span className="font-mono text-lg">❯</span>
                     </div>
 
                     <textarea
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
-                         onKeyDown={(e) => {
-                             if (e.key === 'Enter' && !e.shiftKey) {
-                                 e.preventDefault();
-                                 void handleSend();
-                             }
-                         }}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                void handleSend();
+                            }
+                        }}
                         placeholder={config.placeholder}
                         className="flex-1 bg-transparent border-none focus:ring-0 text-white/90 placeholder:text-white/20 resize-none py-3 px-0 min-h-[48px] max-h-[200px] text-sm font-mono leading-relaxed focus:outline-none"
                     />
 
                     <div className="flex flex-col justify-end p-2">
-                         <button
-                             onClick={() => void handleSend()}
-                             disabled={!inputValue.trim()}
-                             className={clsx(
-                                 "p-2 rounded transition-all",
-                                 inputValue.trim()
-                                     ? config.accent
-                                     : "text-white/10"
-                             )}
-                         >
-                            {inputValue.trim() ? <Send size={14} /> : null}
+                        <button
+                            onClick={() => void handleSend()}
+                            disabled={!inputValue.trim()}
+                            className={clsx(
+                                "p-2.5 rounded-lg transition-all duration-fast",
+                                inputValue.trim()
+                                    ? `${config.accent} hover:scale-110 active:scale-95 bg-white/5 hover:bg-white/10`
+                                    : "text-white/10"
+                            )}
+                        >
+                            <Send size={16} className={clsx(
+                                "transition-transform duration-fast",
+                                inputValue.trim() ? "translate-x-0" : "translate-x-1 opacity-0"
+                            )} />
                         </button>
                     </div>
                 </div>
