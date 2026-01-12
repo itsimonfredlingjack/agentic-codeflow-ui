@@ -19,7 +19,7 @@ export interface OllamaResponse {
   model?: string;
   response?: string;
   message?: { role: string; content: string };
-  metadata?: any;
+  metadata?: Record<string, unknown>;
   error?: string;
 }
 
@@ -49,7 +49,7 @@ export async function callOllama(request: OllamaRequest): Promise<OllamaResponse
 /**
  * List available Ollama models
  */
-export async function listOllamaModels(): Promise<{ success: boolean; models?: any[]; error?: string }> {
+export async function listOllamaModels(): Promise<{ success: boolean; models?: Array<{ name: string }>; error?: string }> {
   const response = await fetch('/api/ollama?action=models', {
     method: 'GET',
   });

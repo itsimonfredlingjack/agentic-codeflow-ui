@@ -16,8 +16,11 @@ interface InMemorySnapshot {
   timestamp: number;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type BetterSqlite3Database = any; // Dynamic require prevents proper typing
+
 class TaskLedger {
-  private db: any;
+  private db: BetterSqlite3Database;
   private useInMemory: boolean;
   private events: InMemoryEvent[] = [];
   private snapshots: InMemorySnapshot[] = [];

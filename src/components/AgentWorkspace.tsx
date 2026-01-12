@@ -735,100 +735,24 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
             {/* Phase Aura Background */}
             <PhaseAura phase={currentPhase} />
 
-            {/* Header / HUD */}
-            <div className="h-14 border-b border-white/5 flex items-center px-6 justify-between bg-black/20 z-10 shrink-0">
-                <div className="flex items-center gap-4">
-                    <div className="relative scale-75 origin-left">
+            {/* Header / HUD - Compact */}
+            <div className="h-9 border-b border-white/5 flex items-center px-4 justify-between bg-black/20 z-10 shrink-0">
+                <div className="flex items-center gap-2">
+                    <div className="relative scale-50 origin-left -mr-3">
                         <AIAvatar phase={currentPhase} isProcessing={localStream.some(s => s.isTyping)} />
                     </div>
-                    <div className={clsx("text-sm font-bold tracking-widest flex items-center gap-2", config.accent)}>
-                        <RoleIcon size={14} />
-                        <span style={{ textShadow: '0 0 10px currentColor' }}>AI_{config.label}</span>
+                    <div className={clsx("text-xs font-bold tracking-widest flex items-center gap-1.5", config.accent)}>
+                        <RoleIcon size={12} />
+                        <span style={{ textShadow: '0 0 8px currentColor' }}>AI_{config.label}</span>
                     </div>
                 </div>
-                <div className="flex items-center gap-2 text-[10px] text-white/20">
-                    <div className={clsx("w-1.5 h-1.5 rounded-full", client ? "bg-emerald-500 animate-pulse" : "bg-red-500")} />
-                    {client ? "SYSTEM ONLINE" : "DISCONNECTED"}
-                </div>
-            </div>
-
-            {/* Context Shelf */}
-            <div className="px-6 py-3 border-b border-white/5 bg-black/30">
-                <div className="flex items-center justify-between text-[10px] uppercase tracking-widest text-white/40">
-                    <span>Context Shelf</span>
-                    <div className="flex items-center gap-2">
-                        <button
-                            type="button"
-                            onClick={handlePinSelection}
-                            className="px-2 py-1 rounded border border-white/10 text-white/60 hover:text-white hover:border-white/30 transition-colors"
-                        >
-                            Pin selection
-                        </button>
-                    </div>
-                </div>
-
-                <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
-                    <div className="flex flex-col gap-2">
-                        <div className="text-[10px] uppercase tracking-widest text-white/30">Working goal</div>
-                        <input
-                            value={workingGoal}
-                            onChange={(e) => {
-                                setWorkingGoal(e.target.value);
-                                setGoalStatus(null);
-                            }}
-                            placeholder="What are we trying to do?"
-                            className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-white/80 placeholder:text-white/20 focus:outline-none focus:border-white/30"
-                        />
-                        {goalStatus && (
-                            <div className={clsx(
-                                "text-[10px] uppercase tracking-widest",
-                                goalStatus.tone === 'ok' ? "text-emerald-400/80" : "text-amber-400/80"
-                            )}>
-                                {goalStatus.message}
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="flex flex-col gap-2">
-                        <div className="flex items-center justify-between text-[10px] uppercase tracking-widest text-white/30">
-                            <span>Latest terminal output</span>
-                            <button
-                                type="button"
-                                onClick={handlePinLatestOutput}
-                                className="text-[10px] text-white/40 hover:text-white transition-colors"
-                            >
-                                Pin output
-                            </button>
-                        </div>
-                        <div className="min-h-[56px] rounded border border-white/10 bg-black/40 p-2 text-xs text-white/70 whitespace-pre-wrap">
-                            {latestTerminalOutput ? truncateText(latestTerminalOutput.content, 220) : 'No terminal output yet.'}
-                        </div>
-                    </div>
-
-                    <div className="flex flex-col gap-2">
-                        <div className="text-[10px] uppercase tracking-widest text-white/30">Pinned</div>
-                        <div className="min-h-[56px] rounded border border-white/10 bg-black/40 p-2 text-xs text-white/70 space-y-2 max-h-28 overflow-y-auto">
-                            {pinnedNotes.length === 0 && (
-                                <div className="text-white/30">Pin text from output to keep context.</div>
-                            )}
-                            {pinnedNotes.map((note, idx) => (
-                                <div key={`${note}-${idx}`} className="flex items-start gap-2">
-                                    <span className="text-white/40">•</span>
-                                    <span className="flex-1">{note}</span>
-                                    <button
-                                        type="button"
-                                        onClick={() => setPinnedNotes((prev) => prev.filter((_, i) => i !== idx))}
-                                        className="text-white/30 hover:text-white/70 transition-colors"
-                                        aria-label="Remove pinned note"
-                                    >
-                                        x
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
+                <div className="flex items-center gap-1.5 text-[9px] text-white/20">
+                    <div className={clsx("w-1 h-1 rounded-full", client ? "bg-emerald-500 animate-pulse" : "bg-red-500")} />
+                    {client ? "ONLINE" : "OFFLINE"}
                 </div>
             </div>
+
+            {/* Context Shelf - Hidden for cleaner UI, can be re-enabled */}
 
             {/* Stream Area - Vertical Timeline OR Shadow Terminal */}
             <div

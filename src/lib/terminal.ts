@@ -1,6 +1,5 @@
 // src/lib/terminal.ts
 import { spawn, ChildProcess } from 'child_process';
-import path from 'path';
 import treeKill from 'tree-kill';
 import { RuntimeEvent, MessageHeader } from '@/types';
 

@@ -9,7 +9,7 @@ export interface BaseMetadata {
 // --- 1. Agent Intents (UI -> Host) ---
 export type AgentIntent = (
   | { type: 'INTENT_PLAN'; goal: string }
-  | { type: 'INTENT_BUILD'; blueprint: any }
+  | { type: 'INTENT_BUILD'; blueprint: Record<string, unknown> }
   | { type: 'INTENT_REVIEW_APPROVE' }
   | { type: 'INTENT_REVIEW_REJECT'; reason: string }
   | { type: 'INTENT_EXEC_CMD'; command: string }

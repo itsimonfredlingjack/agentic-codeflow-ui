@@ -198,7 +198,7 @@ export class OllamaClient {
               try {
                 const parsed = JSON.parse(buffer.trim()) as OllamaGenerateResponse;
                 controller.enqueue(parsed);
-              } catch (e) {
+              } catch {
                 // Ignore incomplete final line
               }
             }
@@ -221,7 +221,7 @@ export class OllamaClient {
             try {
               const parsed = JSON.parse(trimmed) as OllamaGenerateResponse;
               controller.enqueue(parsed);
-            } catch (e) {
+            } catch {
               // Skip invalid JSON (shouldn't happen with proper Ollama responses)
               console.warn('[Ollama] Failed to parse stream line:', trimmed);
             }
@@ -307,7 +307,7 @@ export class OllamaClient {
               try {
                 const parsed = JSON.parse(buffer.trim()) as OllamaChatResponse;
                 controller.enqueue(parsed);
-              } catch (e) {
+              } catch {
                 // Ignore incomplete final line
               }
             }
@@ -330,7 +330,7 @@ export class OllamaClient {
             try {
               const parsed = JSON.parse(trimmed) as OllamaChatResponse;
               controller.enqueue(parsed);
-            } catch (e) {
+            } catch {
               // Skip invalid JSON (shouldn't happen with proper Ollama responses)
               console.warn('[Ollama] Failed to parse stream line:', trimmed);
             }
