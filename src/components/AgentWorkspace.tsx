@@ -1,15 +1,28 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, Terminal, CheckCircle, ShieldAlert, ChevronRight } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect, useRef } from 'react';
+import { Send, Sparkles, Terminal, CheckCircle, ShieldAlert } from 'lucide-react';
 import clsx from 'clsx';
-import { ActionCardProps } from '@/types';
-import { BlueprintCard, BuildStatusCard, SecurityGateCard } from './SemanticCards';
-import { CodeBlockCard } from './CodeBlockCard';
+import type { ActionCardProps, OllamaChatMessage, AgentIntent } from '@/types';
 import { AIAvatar } from './AIAvatar';
 import { PhaseAura } from './PhaseAura';
 import { AgentControls } from './AgentControls';
+import { useAgencyClient } from '@/lib/client';
+import { ShadowTerminal } from './ShadowTerminal';
+
+const DEFAULT_SYSTEM_PROMPT = 'You are a helpful AI assistant.';
+
+// Helper to cap chat history: keep system prompt + last 20 non-system messages
+const capChatHistory = (history: OllamaChatMessage[]): OllamaChatMessage[] => {
+    if (history.length === 0) return history;
+    const nonSystem = history.slice(1);
+    const cappedNonSystem = nonSystem.slice(-20);
+    return [history[0], ...cappedNonSystem];
+};
+
+// Type aliases for client.send calls
+type ExecCmdIntent = Omit<Extract<AgentIntent, { type: 'INTENT_EXEC_CMD' }>, 'header'>;
+type OllamaChatIntent = Omit<Extract<AgentIntent, { type: 'INTENT_OLLAMA_CHAT' }>, 'header'>;
 
 // Extend base types for hybrid stream
 export interface StreamItem extends ActionCardProps {
@@ -20,25 +33,241 @@ export interface StreamItem extends ActionCardProps {
 }
 
 interface AgentWorkspaceProps {
+    runId: string;
     currentPhase: 'plan' | 'build' | 'review' | 'deploy';
     stream: StreamItem[];
     onSendMessage: (message: string) => void;
 }
 
-export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWorkspaceProps) {
+export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onSendMessage }: AgentWorkspaceProps) {
     const [inputValue, setInputValue] = useState('');
-    const scrollRef = useRef<HTMLDivElement>(null);
-    const bottomRef = useRef<HTMLDivElement>(null);
+    const [localStream, setLocalStream] = useState<StreamItem[]>(initialStream);
+    const [chatHistory, setChatHistory] = useState<OllamaChatMessage[]>([{ role: 'system', content: DEFAULT_SYSTEM_PROMPT }]);
+    const hasHydratedStream = useRef(false);
 
-    // Auto-scroll logic
+    const { lastEvent, client } = useAgencyClient(runId);
+
+    // Reset local state when run changes
     useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [stream]);
+        hasHydratedStream.current = false;
+        setLocalStream([]);
+        setChatHistory([{ role: 'system', content: DEFAULT_SYSTEM_PROMPT }]);
+    }, [runId]);
 
-    const handleSend = () => {
+    // Hydrate stream once per run (avoid clobbering optimistic UI)
+    useEffect(() => {
+        if (hasHydratedStream.current) return;
+        if (initialStream.length === 0) return;
+        setLocalStream((prev) => (prev.length === 0 ? initialStream : prev));
+        hasHydratedStream.current = true;
+    }, [initialStream]);
+
+    // Handle Real-time Events
+    useEffect(() => {
+        if (!lastEvent) return;
+
+        if (lastEvent.type === 'OLLAMA_BIT') return;
+
+        const correlationId = lastEvent.header.correlationId;
+        const typingId = `typing-${correlationId}`;
+
+        const item: StreamItem = {
+            id: `evt-${Date.now()}-${Math.random()}`,
+            runId: lastEvent.header.sessionId,
+            timestamp: new Date(lastEvent.header.timestamp).toLocaleTimeString(),
+            phase: currentPhase, // Or derive from event if available
+            title: 'System Event',
+            content: '',
+            type: 'log',
+            severity: 'info',
+            agentId: 'SYSTEM'
+        };
+
+        switch (lastEvent.type) {
+            case 'STDOUT_CHUNK':
+                item.type = 'command';
+                item.title = 'STDOUT';
+                item.content = lastEvent.content;
+                break;
+            case 'STDERR_CHUNK':
+                item.type = 'error';
+                item.title = 'STDERR';
+                item.content = lastEvent.content;
+                item.severity = 'error';
+                break;
+            case 'PROCESS_STARTED':
+                item.type = 'log';
+                item.title = 'Process Started';
+                item.content = `$ ${lastEvent.command} (PID: ${lastEvent.pid})`;
+                break;
+            case 'PROCESS_EXITED':
+                item.type = 'log';
+                item.title = 'Process Exited';
+                item.content = `Exit Code: ${lastEvent.code}`;
+                break;
+
+            case 'PERMISSION_REQUESTED':
+                item.type = 'security_gate';
+                item.title = 'Permission Required';
+                item.content = `Command: ${lastEvent.command}`;
+                item.payload = { policy: 'Manual Approval', status: 'warn' };
+                break;
+            case 'WORKFLOW_ERROR':
+                item.type = 'error';
+                item.title = 'Workflow Error';
+                item.content = lastEvent.error;
+                item.severity = lastEvent.severity === 'fatal' ? 'error' : 'warn';
+                break;
+            case 'OLLAMA_CHAT_STARTED':
+                setLocalStream((prev) => {
+                    const withoutTyping = prev.filter((x) => x.id !== typingId);
+                    return [
+                        ...withoutTyping,
+                        {
+                            id: typingId,
+                            runId,
+                            type: 'log',
+                            title: 'Qwen',
+                            content: 'Thinking…',
+                            timestamp: new Date(lastEvent.header.timestamp).toLocaleTimeString(),
+                            phase: currentPhase,
+                            agentId: 'QWEN',
+                            severity: 'info',
+                            isTyping: true,
+                        },
+                    ];
+                });
+                return;
+            case 'OLLAMA_CHAT_COMPLETED':
+                item.type = 'code';
+                item.title = 'Qwen';
+                item.content = lastEvent.response.message.content;
+                item.agentId = 'QWEN';
+                setLocalStream((prev) => prev.filter((x) => x.id !== typingId));
+                // append assistant message to history
+                setChatHistory(prev => capChatHistory([...prev, { role: 'assistant', content: lastEvent.response.message.content }]));
+                break;
+            case 'OLLAMA_CHAT_FAILED':
+                item.type = 'error';
+                item.title = 'Ollama Chat Failed';
+                item.content = lastEvent.error;
+                item.severity = 'error';
+                setLocalStream((prev) => prev.filter((x) => x.id !== typingId));
+                break;
+            case 'OLLAMA_ERROR':
+                item.type = 'error';
+                item.title = 'Ollama Error';
+                item.content = lastEvent.error;
+                item.severity = 'error';
+                setLocalStream((prev) => prev.filter((x) => x.id !== typingId));
+                break;
+            case 'SYS_READY':
+                item.type = 'log';
+                item.title = 'System Ready';
+                item.content = 'System is ready.';
+                break;
+            default:
+                return; // Ignore other events for now
+        }
+
+        setLocalStream(prev => [...prev, item]);
+    }, [lastEvent, currentPhase]);
+
+    const handleSend = async () => {
         if (!inputValue.trim()) return;
-        onSendMessage(inputValue);
+        
+        const trimmed = inputValue.trim();
+        let mode: 'chat' | 'command' = 'command';
+        let payload = trimmed;
+
+        // 1. Determine Mode & Payload
+        if (trimmed.startsWith('/llm ') || trimmed.startsWith('/chat ')) {
+            mode = 'chat';
+            payload = trimmed.replace(/^(\/llm|\/chat)\s+/, '');
+        } else if (trimmed.startsWith('/exec ') || trimmed.startsWith('/cmd ')) {
+            mode = 'command';
+            payload = trimmed.replace(/^(\/exec|\/cmd)\s+/, '');
+        } else {
+            // Context-aware defaults
+            if (currentPhase === 'plan' || currentPhase === 'review') {
+                mode = 'chat';
+            } else {
+                mode = 'command';
+            }
+        }
+
+        if (!payload) return;
+
+        // 2. Optimistic UI Update
+        const userMsg: StreamItem = {
+            id: Date.now().toString(),
+            runId,
+            type: 'log',
+            title: mode === 'chat' ? 'User Prompt' : 'User Command',
+            content: payload,
+            timestamp: new Date().toLocaleTimeString(),
+            phase: currentPhase,
+            agentId: 'USER',
+            severity: 'info',
+            isUser: true
+        };
+        setLocalStream(prev => [...prev, userMsg]);
         setInputValue('');
+
+        // 3. Dispatch Logic
+        if (mode === 'chat') {
+            const nextHistory = capChatHistory([...chatHistory, { role: 'user', content: payload }]);
+            setChatHistory(nextHistory);
+
+            if (client) {
+                const intent: OllamaChatIntent = {
+                    type: 'INTENT_OLLAMA_CHAT',
+                    messages: nextHistory
+                };
+                try {
+                    await client.send(intent);
+                } catch (error) {
+                    const errorItem: StreamItem = {
+                        id: `error-${Date.now()}`,
+                        runId,
+                        type: 'error',
+                        title: 'Dispatch Failed',
+                        content: error instanceof Error ? error.message : String(error),
+                        timestamp: new Date().toLocaleTimeString(),
+                        phase: currentPhase,
+                        agentId: 'SYSTEM',
+                        severity: 'error'
+                    };
+                    setLocalStream(prev => [...prev, errorItem]);
+                }
+            }
+        } else {
+            // Command Mode
+            if (client) {
+                const intent: ExecCmdIntent = {
+                    type: 'INTENT_EXEC_CMD',
+                    command: payload
+                };
+                try {
+                    await client.send(intent);
+                } catch (error) {
+                    const errorItem: StreamItem = {
+                        id: `error-${Date.now()}`,
+                        runId,
+                        type: 'error',
+                        title: 'Dispatch Failed',
+                        content: error instanceof Error ? error.message : String(error),
+                        timestamp: new Date().toLocaleTimeString(),
+                        phase: currentPhase,
+                        agentId: 'SYSTEM',
+                        severity: 'error'
+                    };
+                    setLocalStream(prev => [...prev, errorItem]);
+                }
+            } else {
+                onSendMessage(payload);
+            }
+        }
     };
 
     // Role Configuration
@@ -54,7 +283,7 @@ export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWor
             case 'build': return {
                 icon: Terminal,
                 label: 'ENGINEER',
-                placeholder: 'Enter build command or debugging query...',
+                placeholder: 'Enter build command, debugging query, or /llm prompt...',
                 accent: 'text-[var(--emerald)]',
                 border: 'border-[var(--emerald)]'
             };
@@ -87,7 +316,7 @@ export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWor
             <div className="h-14 border-b border-white/5 flex items-center px-6 justify-between bg-black/20 z-10 shrink-0">
                 <div className="flex items-center gap-4">
                     <div className="relative scale-75 origin-left">
-                        <AIAvatar phase={currentPhase} isProcessing={stream.some(s => s.isTyping)} />
+                        <AIAvatar phase={currentPhase} isProcessing={localStream.some(s => s.isTyping)} />
                     </div>
                     <div className="flex flex-col">
                         <div className={clsx("text-sm font-bold tracking-widest flex items-center gap-2", config.accent)}>
@@ -95,118 +324,22 @@ export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWor
                             <span style={{ textShadow: '0 0 10px currentColor' }}>AI_{config.label}</span>
                         </div>
                         <div className="text-[10px] text-white/40 tracking-wider">
-                            SESSION ID: <span className="text-white/60">0x1A4F</span> • EVENTS: {stream.length}
+                            SESSION ID: <span className="text-white/60">{runId.slice(0, 8)}</span> • EVENTS: {localStream.length}
                         </div>
                     </div>
                 </div>
                 <div className="flex items-center gap-2 text-[10px] text-white/20">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    SYSTEM ONLINE
+                    <div className={clsx("w-1.5 h-1.5 rounded-full", client ? "bg-emerald-500 animate-pulse" : "bg-red-500")} />
+                    {client ? "SYSTEM ONLINE" : "DISCONNECTED"}
                 </div>
             </div>
 
-            {/* Stream Area - Vertical Timeline */}
+            {/* Stream Area - Vertical Timeline OR Shadow Terminal */}
             <div
-                className="flex-1 overflow-y-auto p-6 console-stream scroll-smooth relative"
-                ref={scrollRef}
+                className="flex-1 overflow-hidden relative"
             >
-                {/* Timeline Line */}
-                <div className="absolute left-8 top-0 bottom-0 w-px bg-white/10" />
-
-                <div className="space-y-8 pl-8">
-                    <AnimatePresence initial={false}>
-                        {stream.map((item) => (
-                            <motion.div
-                                key={item.id}
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className="w-full relative"
-                            >
-                                {/* Timeline Node Indicator */}
-                                <div className={clsx(
-                                    "absolute -left-[37px] top-1 w-2.5 h-2.5 rounded-full border-2 bg-[#050505]",
-                                    item.isUser ? "border-white/40" : config.border
-                                )} />
-
-                                {item.isUser ? (
-                                    // User Entry
-                                    <div className="flex flex-col gap-1">
-                                        <div className="flex items-center gap-2 text-xs text-white/40">
-                                            <span className="font-bold text-white/60">USER</span>
-                                            <ChevronRight size={10} />
-                                            <span className="font-mono">{item.timestamp}</span>
-                                        </div>
-                                        <div className="text-white/90 text-sm leading-relaxed whitespace-pre-wrap font-sans pl-2 border-l-2 border-white/10 py-1">
-                                            {item.content}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    // AI Entry
-                                    <div className="flex flex-col gap-2">
-                                        <div className="flex items-center gap-2 text-xs text-white/40">
-                                            <span className={clsx("font-bold", config.accent)}>{item.agentId || 'SYSTEM'}</span>
-                                            <span className="px-1 py-0.5 rounded border border-white/10 text-[9px] uppercase">{item.phase}</span>
-                                            <span className="font-mono">{item.timestamp}</span>
-                                        </div>
-
-                                        {/* Content based on type */}
-                                        <div className="pl-0">
-                                            {item.type === 'plan_artifact' ? (
-                                                <BlueprintCard content={item.content} />
-                                            ) : item.type === 'build_status' ? (
-                                                <BuildStatusCard
-                                                    title={item.title}
-                                                    progress={(item.payload?.progress as number) || 0}
-                                                />
-                                            ) : item.type === 'code' ? (
-                                                <CodeBlockCard code={item.content} language="typescript" />
-                                            ) : item.type === 'security_gate' ? (
-                                                <SecurityGateCard
-                                                    policy={(item.payload?.policy as string) || "Standard Policy"}
-                                                    status={(item.payload?.status as 'pass' | 'warn' | 'fail') || 'warn'}
-                                                />
-                                            ) : item.type === 'command' ? (
-                                                <div className="font-mono text-xs text-emerald-400/90 flex items-center gap-2">
-                                                    <span className="text-white/40">$</span>
-                                                    {item.content}
-                                                </div>
-                                            ) : item.type === 'error' ? (
-                                                <div className="text-red-400 text-sm flex items-start gap-2 bg-red-950/10 border-l-2 border-red-500/50 p-2">
-                                                    <ShieldAlert size={14} className="shrink-0 mt-0.5" />
-                                                    {item.content}
-                                                </div>
-                                            ) : (
-                                                <div className="text-white/80 text-sm font-mono leading-relaxed">
-                                                    {item.title && (
-                                                        <div className="font-bold text-white/90 mb-1 flex items-center gap-2">
-                                                            {item.title}
-                                                        </div>
-                                                    )}
-                                                    {item.content}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                            </motion.div>
-                        ))}
-                    </AnimatePresence>
-
-                    {/* Typing Indicator */}
-                    {stream.some(s => s.isTyping) && (
-                        <div className="relative">
-                            <div className={clsx(
-                                "absolute -left-[37px] top-1 w-2.5 h-2.5 rounded-full border-2 bg-[#050505] animate-pulse",
-                                config.border
-                            )} />
-                            <div className="text-xs text-white/30 font-mono animate-pulse">
-                                AI_AGENT IS PROCESSING...
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                <div ref={bottomRef} className="h-4" />
+               {/* Using ShadowTerminal for the output area as requested */}
+               <ShadowTerminal actions={localStream} />
             </div>
 
             {/* Elite HUD Enhancements */}
@@ -226,27 +359,27 @@ export function AgentWorkspace({ currentPhase, stream, onSendMessage }: AgentWor
                     <textarea
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                                e.preventDefault();
-                                handleSend();
-                            }
-                        }}
+                         onKeyDown={(e) => {
+                             if (e.key === 'Enter' && !e.shiftKey) {
+                                 e.preventDefault();
+                                 void handleSend();
+                             }
+                         }}
                         placeholder={config.placeholder}
                         className="flex-1 bg-transparent border-none focus:ring-0 text-white/90 placeholder:text-white/20 resize-none py-3 px-0 min-h-[48px] max-h-[200px] text-sm font-mono leading-relaxed focus:outline-none"
                     />
 
                     <div className="flex flex-col justify-end p-2">
-                        <button
-                            onClick={handleSend}
-                            disabled={!inputValue.trim()}
-                            className={clsx(
-                                "p-2 rounded transition-all",
-                                inputValue.trim()
-                                    ? config.accent
-                                    : "text-white/10"
-                            )}
-                        >
+                         <button
+                             onClick={() => void handleSend()}
+                             disabled={!inputValue.trim()}
+                             className={clsx(
+                                 "p-2 rounded transition-all",
+                                 inputValue.trim()
+                                     ? config.accent
+                                     : "text-white/10"
+                             )}
+                         >
                             {inputValue.trim() ? <Send size={14} /> : null}
                         </button>
                     </div>

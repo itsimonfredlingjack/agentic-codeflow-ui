@@ -1,14 +1,14 @@
 // src/lib/runtimeManager.ts
-import { ToolRuntime } from './runtime';
+import { HostRuntime } from './runtime';
 
 // Use a global to persist the runtime during development/HMR
 const globalForRuntime = global as unknown as {
-  runtime: ToolRuntime | undefined;
+  runtime: HostRuntime | undefined;
 };
 
-export function getRuntime(runId: string): ToolRuntime {
+export function getRuntime(runId: string): HostRuntime {
   if (!globalForRuntime.runtime) {
-    globalForRuntime.runtime = new ToolRuntime(runId);
+    globalForRuntime.runtime = new HostRuntime(runId);
   }
   return globalForRuntime.runtime;
 }

@@ -1,36 +1,29 @@
-import { RuntimeEvent } from './types';
+import { RuntimeEvent, SemanticEvent } from '@/types';
 
-export function parseLogLine(line: string): RuntimeEvent | null {
-  // 1. NPM Install detection
-  if (line.match(/installing dependencies/i) || line.match(/npm install/i)) {
-    return { type: 'PHASE_STATUS', status: 'installing' };
-  }
+export function parseLogLine(line: string): RuntimeEvent | SemanticEvent | null {
+  // 1. Clean formatting
+  const clean = line.replace(/\x1b\[[0-9;]*m/g, '').trim(); 
+  if (!clean) return null;
 
-  // 2. Progress Bars (e.g., [====>    ])
-  // Matches square brackets containing =, >, and spaces
-  const progressMatch = line.match(/\[(=+)(>)?(\s*)\]/);
-  if (progressMatch) {
-    const filled = progressMatch[1].length;
-    const total = filled + (progressMatch[3]?.length || 0);
-    if (total > 0) {
-      const percentage = Math.round((filled / total) * 100);
-      return { type: 'PROGRESS_UPDATE', value: percentage };
-    }
-  }
-
-  // 3. Build Success
-  if (line.match(/Build completed in/i) || line.match(/Compiled successfully/i)) {
-    return { type: 'BUILD_SUCCESS' };
-  }
-
-  // 4. Errors
-  if (line.match(/^Error:/i) || line.match(/Exception/i) || line.match(/Failed to compile/i)) {
+  // 2. Critical Errors (RESTORED)
+  // If we see "Error:" or "Failed to compile", explicitly fail the build.
+  if (clean.match(/^Error:/i) || clean.includes('Failed to compile') || clean.includes('Exception:')) {
     return { 
-      type: 'ERROR', 
-      severity: 'warn', 
-      message: line.trim() 
-    };
+      type: 'BUILD_COMPLETE', 
+      durationMs: 0, 
+      success: false 
+    } as SemanticEvent;
   }
 
-  return null;
+  // 3. NPM/Install Stages
+  if (clean.startsWith('installing') || clean.includes('npm install')) {
+    return { type: 'PHASE_STATUS', status: 'installing' } as SemanticEvent;
+  }
+
+  // 4. Success Marker
+  if (clean.includes('Build completed') || clean.includes('Successfully compiled')) {
+    return { type: 'BUILD_COMPLETE', durationMs: 1000, success: true } as SemanticEvent;
+  }
+
+  return null; 
 }

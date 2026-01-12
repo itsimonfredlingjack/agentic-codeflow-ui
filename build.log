@@ -1,0 +1,31 @@
+
+> 02_llm-creative@0.1.0 build
+> next build
+
+▲ Next.js 16.1.1 (Turbopack)
+- Environments: .env.local
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 2.2s
+  Running TypeScript ...
+  Collecting page data using 5 workers ...
+  Generating static pages using 5 workers (0/7) ...
+  Generating static pages using 5 workers (1/7) 
+  Generating static pages using 5 workers (3/7) 
+  Generating static pages using 5 workers (5/7) 
+✓ Generating static pages using 5 workers (7/7) in 143.5ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ƒ /api/command
+├ ƒ /api/events
+├ ƒ /api/ollama
+├ ƒ /api/run
+└ ƒ /api/stream
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

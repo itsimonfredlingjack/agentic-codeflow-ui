@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useMachine } from '@xstate/react';
+import type { SnapshotFrom } from 'xstate';
 import { ReviewGate } from './ReviewGate';
 import { AgentWorkspace } from './AgentWorkspace';
-import { ActionCardProps } from '@/types';
+import { ActionCardProps, RuntimeEvent } from '@/types';
 import { LayoutGrid, Cpu, Shield, Zap, Activity, PanelLeft, Settings, ChevronsRight } from 'lucide-react';
 import clsx from 'clsx';
 import { missionControlMachine } from '@/machines/missionControlMachine';
@@ -16,16 +17,30 @@ import { AgentSelector } from './AgentSelector';
 import { ProjectTodos } from './ProjectTodos';
 import { StatusBar } from './StatusBar';
 
-// Define explicit types to avoid 'any'
-interface MissionSnapshot {
+type MissionPersistedSnapshot = {
+    status: string;
     value: string | Record<string, string>;
     context: {
         runId: string;
         agentId: string | null;
         error: string | null;
     };
-    matches: (stateValue: string | Record<string, unknown>) => boolean;
-}
+    children?: Record<string, unknown>;
+    historyValue?: Record<string, unknown>;
+    tags?: string[];
+    output?: unknown;
+    error?: unknown;
+};
+
+const isPersistedSnapshot = (value: unknown): value is MissionPersistedSnapshot => {
+    if (!value || typeof value !== 'object') return false;
+    const record = value as Record<string, unknown>;
+    return (
+        typeof record.status === 'string' &&
+        'value' in record &&
+        'context' in record
+    );
+};
 
 const phases = [
     { id: 'plan', label: 'PLAN', color: 'var(--sapphire)', icon: LayoutGrid },
@@ -43,23 +58,32 @@ const PHASE_MAP: Record<string, 'plan' | 'build' | 'review' | 'deploy'> = {
 };
 
 export function MissionControl() {
-    const [initialSnapshot, setInitialSnapshot] = useState<MissionSnapshot | null>(null);
+    const [initialSnapshot, setInitialSnapshot] = useState<MissionPersistedSnapshot | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
         const loadSession = async () => {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 1500);
+
             try {
-                const res = await fetch('/api/run');
+                const res = await fetch('/api/run', { signal: controller.signal });
                 if (res.ok) {
                     const data = await res.json();
-                    if (data && data.context) {
+                    const candidate = data?.snapshot ?? data?.context;
+                    if (candidate && isPersistedSnapshot(candidate)) {
                         console.log("Resuming session:", data.id);
-                        setInitialSnapshot(data.context);
+                        setInitialSnapshot(candidate);
                     }
                 }
             } catch (err) {
-                console.warn("Failed to load session", err);
+                if (err instanceof Error && err.name === 'AbortError') {
+                    console.warn("Session load timeout");
+                } else {
+                    console.warn("Failed to load session", err);
+                }
             } finally {
+                clearTimeout(timeoutId);
                 setIsLoading(false);
             }
         };
@@ -78,18 +102,19 @@ export function MissionControl() {
     return <MissionControlInner initialSnapshot={initialSnapshot} />;
 }
 
-function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSnapshot | null }) {
+function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPersistedSnapshot | null }) {
     // Note: Internal usage guarded by strict types now.
-    const [snapshot, send] = useMachine(missionControlMachine, {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        snapshot: initialSnapshot as any // XState hydration cast if structure differs strictly
-    });
+    const machineOptions = initialSnapshot
+        ? { snapshot: initialSnapshot as unknown as SnapshotFrom<typeof missionControlMachine> }
+        : undefined;
+    const [snapshot, send, actorRef] = useMachine(missionControlMachine, machineOptions);
     const [actions, setActions] = useState<ActionCardProps[]>([]);
     const [leftPanelOpen, setLeftPanelOpen] = useState(true);
     const [rightPanelOpen, setRightPanelOpen] = useState(true);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState(false);
     const [activeAgentId, setActiveAgentId] = useState('architect');
+    const sessionStartRef = useRef(Date.now());
 
     // Command Palette Logic
     useEffect(() => {
@@ -102,6 +127,11 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSna
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
+
+    useEffect(() => {
+        sessionStartRef.current = Date.now();
+        setActions([]);
+    }, [snapshot.context.runId]);
 
     const handleCommand = (cmdId: string) => {
         switch (cmdId) {
@@ -132,12 +162,13 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSna
 
         const saveState = async () => {
             try {
+                const persisted = actorRef.getPersistedSnapshot();
                 await fetch('/api/run', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         id: snapshot.context.runId,
-                        context: snapshot, // Saving FULL snapshot
+                        snapshot: persisted,
                         status: typeof snapshot.value === 'string' ? snapshot.value : JSON.stringify(snapshot.value)
                     })
                 });
@@ -149,7 +180,7 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSna
         // Debounce simple save
         const timer = setTimeout(saveState, 1000);
         return () => clearTimeout(timer);
-    }, [snapshot]);
+    }, [snapshot, actorRef]);
 
     // Poll for events from SQLite "Task Ledger"
     useEffect(() => {
@@ -158,33 +189,52 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSna
                 const res = await fetch(`/api/events?runId=${snapshot.context.runId}`);
                 if (res.ok) {
                     const data = await res.json();
+                    const filteredEvents = (data as RuntimeEvent[]).filter((event) => {
+                        if (event.type === 'OLLAMA_BIT') return false;
+                        if (event.type === 'OLLAMA_CHAT_STARTED') return false;
+                        const timestamp = event.header?.timestamp;
+                        if (typeof timestamp !== 'number') return false;
+                        return timestamp >= sessionStartRef.current;
+                    });
                     
-                    // Map RuntimeEvent to ActionCardProps for the UI
-                    const mappedEvents = data.map((event: any, index: number) => {
+                     // Map RuntimeEvent to ActionCardProps for the UI
+                    const mappedEvents: ActionCardProps[] = filteredEvents.map((event: RuntimeEvent, index: number): ActionCardProps => {
                         const base = {
                             id: `${snapshot.context.runId}-${index}`,
                             runId: snapshot.context.runId,
-                            timestamp: event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString(),
+                            timestamp: new Date(event.header.timestamp).toLocaleTimeString(),
                             phase: currentPhase,
                             agentId: 'SYSTEM',
                             severity: 'info' as const,
                         };
 
                         switch (event.type) {
-                            case 'LOG_STDOUT':
-                                return { ...base, type: 'command', content: event.content, title: 'STDOUT' };
-                            case 'LOG_STDERR':
-                                return { ...base, type: 'error', content: event.content, title: 'STDERR', severity: 'error' };
-                            case 'AGENT_THOUGHT':
-                                return { ...base, type: 'log', title: event.title, content: event.content };
-                            case 'ARTIFACT_GENERATED':
-                                return { ...base, type: 'code', title: event.name, content: event.content };
-                            case 'ERROR':
-                                return { ...base, type: 'error', title: 'Error', content: event.message, severity: event.severity === 'fatal' ? 'error' : 'warn' };
-                            case 'PHASE_CHANGED':
-                                return { ...base, type: 'log', title: 'Phase Changed', content: `Transitioned to ${event.phase}` };
+                            case 'STDOUT_CHUNK':
+                                return { ...base, type: 'command' as const, content: event.content, title: 'STDOUT' };
+                            case 'STDERR_CHUNK':
+                                return { ...base, type: 'error' as const, content: event.content, title: 'STDERR', severity: 'error' as const };
+                            case 'WORKFLOW_ERROR':
+                                return {
+                                    ...base,
+                                    type: 'error' as const,
+                                    title: 'Error',
+                                    content: event.error,
+                                    severity: event.severity === 'fatal' ? 'error' : 'warn'
+                                };
+                            case 'OLLAMA_CHAT_COMPLETED':
+                                return { ...base, type: 'code' as const, title: 'Qwen', content: event.response.message.content, agentId: 'QWEN' };
+                            case 'OLLAMA_ERROR':
+                                return { ...base, type: 'error' as const, title: 'Ollama Error', content: event.error, severity: 'error' as const };
+                            case 'PROCESS_STARTED':
+                                return { ...base, type: 'log' as const, title: 'Process Started', content: `PID: ${event.pid}, Command: ${event.command}` };
+                            case 'PROCESS_EXITED':
+                                return { ...base, type: 'log' as const, title: 'Process Exited', content: `Exit code: ${event.code}` };
+                            case 'SECURITY_VIOLATION':
+                                return { ...base, type: 'error' as const, title: 'Security Violation', content: `Policy: ${event.policy}, Path: ${event.attemptedPath}`, severity: 'error' as const };
+                            case 'PERMISSION_REQUESTED':
+                                return { ...base, type: 'log' as const, title: 'Permission Request', content: `Command: ${event.command}, Risk: ${event.riskLevel}` };
                             default:
-                                return { ...base, type: 'log', title: event.type, content: JSON.stringify(event) };
+                                return { ...base, type: 'log' as const, title: event.type, content: JSON.stringify(event) };
                         }
                     });
                     
@@ -372,6 +422,7 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionSna
             <main className="p-0 rounded-xl relative group flex flex-col overflow-hidden">
                 {/* Unified Agent Workspace */}
                 <AgentWorkspace
+                    runId={snapshot.context.runId}
                     currentPhase={currentPhase}
                     stream={actions} // Types match ActionCardProps
                     onSendMessage={(msg) => {

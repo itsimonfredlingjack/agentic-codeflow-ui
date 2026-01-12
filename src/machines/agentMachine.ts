@@ -15,7 +15,7 @@ export const agentMachine = setup({
       | { type: 'RETRY' }
   },
   actions: {
-      persistState: ({ context, event }, params) => {
+      persistState: ({ context, event }) => {
          // Mock runId for now, ideally passed in context
          ledger.saveSnapshot(context.runId || 'default', event.type, context);
       }
@@ -38,6 +38,7 @@ export const agentMachine = setup({
       states: {
         executing: {
           on: {
+            START_BUILD: 'executing',
             BUILD_SUCCESS: '#agentWorkflow.reviewing',
             BUILD_ERROR: {
               target: 'analyzing_error',

@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { runtimeManager } from '@/lib/runtimeManager';
 import { ledger } from '@/lib/ledger';
 
+export const runtime = 'nodejs';
+
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     let runId = searchParams.get('runId');
@@ -33,19 +35,16 @@ export async function GET(request: Request) {
         ledger.createRun(runId!);
     }
 
-    return NextResponse.json({ 
-        id: runId, 
-        context: snapshot ? { 
-            value: snapshot.stateValue, 
-            context: snapshot.context 
-        } : null,
+    return NextResponse.json({
+        id: runId,
+        snapshot: snapshot ? snapshot.context : null,
         isResumed: !!snapshot
     });
 }
 
 export async function POST(request: Request) {
     const body = await request.json();
-    const { id, context, status } = body;
+    const { id, snapshot, context, status } = body;
 
     if (!id) {
         return NextResponse.json({ error: 'Missing id in body' }, { status: 400 });
@@ -58,8 +57,13 @@ export async function POST(request: Request) {
     ledger.createRun(id);
 
     // If the UI is explicitly saving a snapshot (persistence loop)
-    if (context && status) {
-        ledger.saveSnapshot(id, typeof status === 'string' ? status : JSON.stringify(status), context);
+    const snapshotPayload = snapshot ?? context;
+    if (snapshotPayload && status) {
+        ledger.saveSnapshot(
+            id,
+            typeof status === 'string' ? status : JSON.stringify(status),
+            snapshotPayload
+        );
     }
 
     return NextResponse.json({ success: true, id });
