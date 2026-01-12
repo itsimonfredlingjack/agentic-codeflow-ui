@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { Send, Sparkles, Terminal, CheckCircle, ShieldAlert } from 'lucide-react';
 import clsx from 'clsx';
 import type { ActionCardProps, OllamaChatMessage, AgentIntent } from '@/types';
@@ -39,19 +39,48 @@ interface AgentWorkspaceProps {
     onSendMessage: (message: string) => void;
 }
 
+type SlashCommand = {
+    id: string;
+    label: string;
+    description: string;
+    insert: string;
+};
+
 export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onSendMessage }: AgentWorkspaceProps) {
     const [inputValue, setInputValue] = useState('');
     const [localStream, setLocalStream] = useState<StreamItem[]>(initialStream);
     const [chatHistory, setChatHistory] = useState<OllamaChatMessage[]>([{ role: 'system', content: DEFAULT_SYSTEM_PROMPT }]);
     const hasHydratedStream = useRef(false);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+    const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+    const [slashQuery, setSlashQuery] = useState('');
+    const [slashActiveIndex, setSlashActiveIndex] = useState(0);
 
     const { lastEvent, client } = useAgencyClient(runId);
+
+    const slashCommands: SlashCommand[] = useMemo(() => [
+        { id: 'chat', label: '/chat', description: 'Chat with Qwen (same as /llm)', insert: '/chat ' },
+        { id: 'llm', label: '/llm', description: 'Chat with Qwen (explicit)', insert: '/llm ' },
+        { id: 'exec', label: '/exec', description: 'Run a shell command', insert: '/exec ' },
+        { id: 'cmd', label: '/cmd', description: 'Run a shell command (alias)', insert: '/cmd ' },
+        { id: 'init', label: '/init', description: 'Initialize a fresh session (placeholder)', insert: '/init ' },
+    ], []);
+
+    const filteredSlashCommands = useMemo(() => {
+        const q = slashQuery.trim().toLowerCase();
+        if (!q) return slashCommands;
+        return slashCommands.filter((cmd) => cmd.label.toLowerCase().includes(q) || cmd.description.toLowerCase().includes(q));
+    }, [slashCommands, slashQuery]);
 
     // Reset local state when run changes
     useEffect(() => {
         hasHydratedStream.current = false;
         setLocalStream([]);
         setChatHistory([{ role: 'system', content: DEFAULT_SYSTEM_PROMPT }]);
+        setSlashMenuOpen(false);
+        setSlashQuery('');
+        setSlashActiveIndex(0);
     }, [runId]);
 
     // Hydrate stream once per run (avoid clobbering optimistic UI)
@@ -172,6 +201,63 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
 
         setLocalStream(prev => [...prev, item]);
     }, [lastEvent, currentPhase]);
+
+    const updateSlashStateFromInput = (nextValue: string) => {
+        const el = textareaRef.current;
+        const cursor = el?.selectionStart ?? nextValue.length;
+
+        const beforeCursor = nextValue.slice(0, cursor);
+        const match = beforeCursor.match(/(^|[\s\n])\/([a-zA-Z0-9-_]*)$/);
+        if (!match) {
+            setSlashMenuOpen(false);
+            setSlashQuery('');
+            setSlashActiveIndex(0);
+            return;
+        }
+
+        setSlashMenuOpen(true);
+        setSlashQuery(match[2] || '');
+        setSlashActiveIndex(0);
+    };
+
+    const insertSlashCommand = (command: SlashCommand) => {
+        const el = textareaRef.current;
+        if (!el) {
+            setInputValue(command.insert);
+            setSlashMenuOpen(false);
+            return;
+        }
+
+        const cursor = el.selectionStart ?? inputValue.length;
+        const beforeCursor = inputValue.slice(0, cursor);
+        const afterCursor = inputValue.slice(cursor);
+
+        const match = beforeCursor.match(/(^|[\s\n])\/([a-zA-Z0-9-_]*)$/);
+        if (!match) {
+            setInputValue(command.insert);
+            setSlashMenuOpen(false);
+            return;
+        }
+
+        const startIndex = beforeCursor.length - (`/${match[2] || ''}`).length;
+        const next = `${inputValue.slice(0, startIndex)}${command.insert}${afterCursor.replace(/^\s+/, '')}`;
+        setInputValue(next);
+        setSlashMenuOpen(false);
+        setSlashQuery('');
+        setSlashActiveIndex(0);
+
+        requestAnimationFrame(() => {
+            const nextCursor = startIndex + command.insert.length;
+            el.focus();
+            el.setSelectionRange(nextCursor, nextCursor);
+        });
+    };
+
+    useEffect(() => {
+        if (!slashMenuOpen) return;
+        if (filteredSlashCommands.length === 0) return;
+        setSlashActiveIndex((prev) => Math.min(prev, filteredSlashCommands.length - 1));
+    }, [slashMenuOpen, filteredSlashCommands.length]);
 
     const handleSend = async () => {
         if (!inputValue.trim()) return;
@@ -351,15 +437,79 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                     "relative group flex items-stretch overflow-hidden",
                     // Removed background, just border and glowing text
                 )}>
+                    {/* Slash Menu */}
+                    {slashMenuOpen && filteredSlashCommands.length > 0 && (
+                        <div className="absolute bottom-full left-0 right-0 mb-2 z-50">
+                            <div className="mx-2 rounded-lg border border-white/10 bg-black/90 shadow-xl overflow-hidden">
+                                <div className="px-3 py-2 text-[10px] text-white/40 font-mono border-b border-white/10">
+                                    Commands
+                                </div>
+                                <div className="max-h-56 overflow-y-auto">
+                                    {filteredSlashCommands.map((cmd, idx) => (
+                                        <button
+                                            key={cmd.id}
+                                            type="button"
+                                            onMouseEnter={() => setSlashActiveIndex(idx)}
+                                            onMouseDown={(e) => e.preventDefault()}
+                                            onClick={() => insertSlashCommand(cmd)}
+                                            className={clsx(
+                                                "w-full text-left px-3 py-2 flex items-start gap-3 font-mono",
+                                                idx === slashActiveIndex ? "bg-white/10" : "bg-transparent hover:bg-white/5"
+                                            )}
+                                            aria-selected={idx === slashActiveIndex}
+                                        >
+                                            <div className="text-white/90 text-xs w-16 shrink-0">{cmd.label}</div>
+                                            <div className="text-white/40 text-xs">{cmd.description}</div>
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="px-3 py-2 text-[10px] text-white/30 border-t border-white/10">
+                                    ↑/↓ to navigate • Enter/Tab to insert • Esc to close
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Prefix Icon */}
                     <div className="w-8 flex items-start pt-3 justify-center text-white/30">
                         <span className="font-mono text-lg">❯</span>
                     </div>
 
                     <textarea
+                        ref={textareaRef}
                         value={inputValue}
-                        onChange={(e) => setInputValue(e.target.value)}
+                        onChange={(e) => {
+                            const next = e.target.value;
+                            setInputValue(next);
+                            updateSlashStateFromInput(next);
+                        }}
                          onKeyDown={(e) => {
+                             if (slashMenuOpen) {
+                                 if (e.key === 'Escape') {
+                                     e.preventDefault();
+                                     setSlashMenuOpen(false);
+                                     return;
+                                 }
+                                 if (e.key === 'ArrowDown') {
+                                     e.preventDefault();
+                                     setSlashActiveIndex((prev) => Math.min(prev + 1, filteredSlashCommands.length - 1));
+                                     return;
+                                 }
+                                 if (e.key === 'ArrowUp') {
+                                     e.preventDefault();
+                                     setSlashActiveIndex((prev) => Math.max(prev - 1, 0));
+                                     return;
+                                 }
+                                 if (e.key === 'Enter' || e.key === 'Tab') {
+                                     const cmd = filteredSlashCommands[slashActiveIndex];
+                                     if (cmd) {
+                                         e.preventDefault();
+                                         insertSlashCommand(cmd);
+                                         return;
+                                     }
+                                 }
+                             }
+
                              if (e.key === 'Enter' && !e.shiftKey) {
                                  e.preventDefault();
                                  void handleSend();
