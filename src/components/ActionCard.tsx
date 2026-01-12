@@ -1,6 +1,6 @@
 "use client";
 
-import React from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import clsx from 'clsx';
 import { ActionCardProps, type ActionType } from '@/types';
@@ -31,6 +31,32 @@ export function ActionCard({ type, title, content, timestamp, agentId, severity,
     const accent = isUser ? 'var(--emerald)' : typeColors[type];
     const who = isUser ? 'YOU' : agentId || 'SYS';
     const severityLabel = severity === 'error' ? 'ERR' : severity === 'warn' ? 'WARN' : null;
+    const isChat = (agentId === 'USER' || agentId === 'QWEN') && type !== 'command';
+    const isTerminal = type === 'command' || title === 'STDOUT' || title === 'STDERR';
+    const contentLines = content.split('\n');
+    const isLong = content.length > 800 || contentLines.length > 14;
+    const shouldUseBlockFolding = isLong && !isChat;
+    const blockSize = 12;
+    const collapsedLines = 3;
+
+    const blocks = useMemo(() => {
+        if (!shouldUseBlockFolding) return [];
+        const chunks: string[][] = [];
+        for (let i = 0; i < contentLines.length; i += blockSize) {
+            chunks.push(contentLines.slice(i, i + blockSize));
+        }
+        return chunks;
+    }, [contentLines, shouldUseBlockFolding]);
+
+    const [expandedBlocks, setExpandedBlocks] = useState<boolean[]>([]);
+
+    useEffect(() => {
+        if (!shouldUseBlockFolding) {
+            setExpandedBlocks([]);
+            return;
+        }
+        setExpandedBlocks(blocks.map((_, idx) => idx === 0));
+    }, [shouldUseBlockFolding, blocks.length, content]);
 
     const animations = shouldReduceMotion ? {
         initial: { opacity: 0 },
@@ -64,7 +90,46 @@ export function ActionCard({ type, title, content, timestamp, agentId, severity,
                     {isTyping ? (
                         <span className="text-white/40 animate-pulse text-[15px]">…</span>
                     ) : (
-                        <MarkdownMessage content={content} />
+                        shouldUseBlockFolding ? (
+                            <div className="space-y-2">
+                                {blocks.map((block, index) => {
+                                    const isExpanded = expandedBlocks[index] ?? (index === 0);
+                                    const blockContent = isExpanded
+                                        ? block.join('\n')
+                                        : `${block.slice(0, collapsedLines).join('\n')}${block.length > collapsedLines ? '\n…' : ''}`;
+                                    const canToggle = block.length > collapsedLines || blockContent.length > 120;
+
+                                    return (
+                                        <div key={`${timestamp}-${index}`} className="rounded border border-white/5 bg-black/20 p-2">
+                                            <div className="flex items-center justify-between text-[10px] uppercase tracking-widest text-white/30">
+                                                <span>Block {index + 1}/{blocks.length}</span>
+                                                {canToggle && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setExpandedBlocks((prev) => {
+                                                            const next = [...prev];
+                                                            next[index] = !isExpanded;
+                                                            return next;
+                                                        })}
+                                                        className={clsx(
+                                                            "text-[10px] uppercase tracking-widest",
+                                                            isTerminal ? "text-emerald-400/80 hover:text-emerald-300" : "text-white/50 hover:text-white/70"
+                                                        )}
+                                                    >
+                                                        {isExpanded ? 'Collapse block' : 'Expand block'}
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <pre className="whitespace-pre-wrap text-white/80 text-[var(--terminal-font-size)] font-mono mt-1">
+                                                {blockContent}
+                                            </pre>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <MarkdownMessage content={content} />
+                        )
                     )}
                 </div>
             </div>

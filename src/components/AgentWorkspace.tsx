@@ -10,7 +10,17 @@ import { AgentControls } from './AgentControls';
 import { useAgencyClient } from '@/lib/client';
 import { ShadowTerminal } from './ShadowTerminal';
 
-const DEFAULT_SYSTEM_PROMPT = 'You are a helpful AI assistant.';
+const DEFAULT_SYSTEM_PROMPT = `You are a helpful, compliant, and proactive AI coding assistant. Your primary goal is to help users by writing code, providing solutions, and answering questions directly and efficiently.
+
+Key behaviors:
+- Always write code snippets when requested, even if the request is brief or has minor typos
+- Be helpful and compliant - never refuse reasonable requests or ask for excessive clarification
+- If a request is unclear, make reasonable assumptions and proceed rather than asking many questions
+- When asked to write code, write it immediately without hesitation
+- Be direct and action-oriented, similar to Claude Haiku 4.5's helpfulness
+- Focus on being useful and getting things done rather than being overly cautious
+
+You are here to help, not to question or refuse. Write code, provide solutions, and assist users promptly.`;
 
 // Helper to cap chat history: keep system prompt + last 20 non-system messages
 const capChatHistory = (history: OllamaChatMessage[]): OllamaChatMessage[] => {
@@ -18,6 +28,21 @@ const capChatHistory = (history: OllamaChatMessage[]): OllamaChatMessage[] => {
     const nonSystem = history.slice(1);
     const cappedNonSystem = nonSystem.slice(-20);
     return [history[0], ...cappedNonSystem];
+};
+
+const buildSystemPrompt = (memoryNotes: string[], pinnedNotes: string[], workingGoal: string) => {
+    const sections: string[] = [];
+    const goal = workingGoal.trim();
+    if (goal) {
+        sections.push(`Working goal:\n- ${goal}`);
+    }
+    if (pinnedNotes.length) {
+        sections.push(`Pinned:\n- ${pinnedNotes.join('\n- ')}`);
+    }
+    if (memoryNotes.length) {
+        sections.push(`Memory:\n- ${memoryNotes.join('\n- ')}`);
+    }
+    return sections.length ? `${DEFAULT_SYSTEM_PROMPT}\n\n${sections.join('\n\n')}` : DEFAULT_SYSTEM_PROMPT;
 };
 
 // Type aliases for client.send calls
@@ -46,20 +71,67 @@ type SlashCommand = {
     insert: string;
 };
 
+type MentionTarget = {
+    id: string;
+    label: string;
+    description: string;
+    insert: string;
+};
+
+type MacroCommand = {
+    id: string;
+    label: string;
+    description: string;
+    insert: string;
+    command: string;
+};
+
+type AutocompleteKind = 'slash' | 'mention' | 'macro';
+
+type AutocompleteItem = {
+    id: string;
+    label: string;
+    description: string;
+    insert: string;
+    kind: AutocompleteKind;
+};
+
+type ParsedInput = {
+    mode: 'chat' | 'terminal' | 'system';
+    payload: string;
+    command?: string;
+    macro?: MacroCommand;
+    agentTarget?: MentionTarget;
+};
+
 export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onSendMessage }: AgentWorkspaceProps) {
     const [inputValue, setInputValue] = useState('');
     const [localStream, setLocalStream] = useState<StreamItem[]>(initialStream);
-    const [chatHistory, setChatHistory] = useState<OllamaChatMessage[]>([{ role: 'system', content: DEFAULT_SYSTEM_PROMPT }]);
+    const [memoryNotes, setMemoryNotes] = useState<string[]>([]);
+    const [pinnedNotes, setPinnedNotes] = useState<string[]>([]);
+    const [workingGoal, setWorkingGoal] = useState('');
+    const [goalStatus, setGoalStatus] = useState<{ message: string; tone: 'ok' | 'warn' } | null>(null);
+    const [chatHistory, setChatHistory] = useState<OllamaChatMessage[]>([
+        { role: 'system', content: buildSystemPrompt([], [], '') }
+    ]);
     const hasHydratedStream = useRef(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const goalStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const [slashMenuOpen, setSlashMenuOpen] = useState(false);
-    const [slashQuery, setSlashQuery] = useState('');
-    const [slashActiveIndex, setSlashActiveIndex] = useState(0);
+    const [autocompleteOpen, setAutocompleteOpen] = useState(false);
+    const [autocompleteQuery, setAutocompleteQuery] = useState('');
+    const [autocompleteActiveIndex, setAutocompleteActiveIndex] = useState(0);
+    const [autocompleteKind, setAutocompleteKind] = useState<AutocompleteKind>('slash');
 
     const { lastEvent, client } = useAgencyClient(runId);
 
     const slashCommands: SlashCommand[] = useMemo(() => [
+        { id: 'help', label: '/help', description: 'Show available commands', insert: '/help' },
+        { id: 'models', label: '/models', description: 'List Ollama models', insert: '/models' },
+        { id: 'clear', label: '/clear', description: 'Clear local output', insert: '/clear' },
+        { id: 'remember', label: '/remember', description: 'Remember a note', insert: '/remember ' },
+        { id: 'pin', label: '/pin', description: 'Pin a note', insert: '/pin ' },
+        { id: 'goal', label: '/goal', description: 'Set working goal', insert: '/goal ' },
         { id: 'chat', label: '/chat', description: 'Chat with Qwen (same as /llm)', insert: '/chat ' },
         { id: 'llm', label: '/llm', description: 'Chat with Qwen (explicit)', insert: '/llm ' },
         { id: 'exec', label: '/exec', description: 'Run a shell command', insert: '/exec ' },
@@ -67,20 +139,53 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
         { id: 'init', label: '/init', description: 'Initialize a fresh session (placeholder)', insert: '/init ' },
     ], []);
 
-    const filteredSlashCommands = useMemo(() => {
-        const q = slashQuery.trim().toLowerCase();
-        if (!q) return slashCommands;
-        return slashCommands.filter((cmd) => cmd.label.toLowerCase().includes(q) || cmd.description.toLowerCase().includes(q));
-    }, [slashCommands, slashQuery]);
+    const mentionTargets: MentionTarget[] = useMemo(() => [
+        { id: 'plan', label: '@plan', description: 'Planning mode', insert: '@plan ' },
+        { id: 'build', label: '@build', description: 'Build mode', insert: '@build ' },
+        { id: 'review', label: '@review', description: 'Review mode', insert: '@review ' },
+        { id: 'deploy', label: '@deploy', description: 'Deploy mode', insert: '@deploy ' },
+        { id: 'engineer', label: '@engineer', description: 'Implementation and fixes', insert: '@engineer ' },
+        { id: 'designer', label: '@designer', description: 'UI and UX ideas', insert: '@designer ' },
+        { id: 'reviewer', label: '@reviewer', description: 'Critical review and QA', insert: '@reviewer ' },
+        { id: 'build-helper', label: '@build-helper', description: 'Beta: build assistance', insert: '@build-helper ' },
+        { id: 'frontend-designer', label: '@frontend-designer', description: 'Beta: UI execution', insert: '@frontend-designer ' },
+        { id: 'code-reviewer', label: '@code-reviewer', description: 'Beta: code review', insert: '@code-reviewer ' },
+    ], []);
+
+    const macroCommands: MacroCommand[] = useMemo(() => [
+        { id: 'test', label: '!test', description: 'Typecheck (no tests configured)', insert: '!test ', command: 'npx tsc -p tsconfig.json --noEmit' },
+        { id: 'lint', label: '!lint', description: 'Run eslint', insert: '!lint ', command: 'npm run lint' },
+        { id: 'build', label: '!build', description: 'Production build', insert: '!build ', command: 'npm run build' },
+    ], []);
+
+    const autocompleteItems = useMemo<Record<AutocompleteKind, AutocompleteItem[]>>(() => ({
+        slash: slashCommands.map((cmd) => ({ ...cmd, kind: 'slash' as const })),
+        mention: mentionTargets.map((target) => ({ ...target, kind: 'mention' as const })),
+        macro: macroCommands.map((macro) => ({ ...macro, kind: 'macro' as const })),
+    }), [slashCommands, mentionTargets, macroCommands]);
+
+    const filteredAutocompleteItems = useMemo(() => {
+        const q = autocompleteQuery.trim().toLowerCase();
+        const items = autocompleteItems[autocompleteKind] ?? [];
+        if (!q) return items;
+        return items.filter((item) => item.label.toLowerCase().includes(q) || item.description.toLowerCase().includes(q));
+    }, [autocompleteItems, autocompleteKind, autocompleteQuery]);
+
+    const macroLookup = useMemo(() => new Map(macroCommands.map((macro) => [macro.id, macro])), [macroCommands]);
+    const mentionLookup = useMemo(() => new Map(mentionTargets.map((target) => [target.id, target])), [mentionTargets]);
 
     // Reset local state when run changes
     useEffect(() => {
         hasHydratedStream.current = false;
         setLocalStream([]);
-        setChatHistory([{ role: 'system', content: DEFAULT_SYSTEM_PROMPT }]);
-        setSlashMenuOpen(false);
-        setSlashQuery('');
-        setSlashActiveIndex(0);
+        setMemoryNotes([]);
+        setPinnedNotes([]);
+        setWorkingGoal('');
+        setGoalStatus(null);
+        setChatHistory([{ role: 'system', content: buildSystemPrompt([], [], '') }]);
+        setAutocompleteOpen(false);
+        setAutocompleteQuery('');
+        setAutocompleteActiveIndex(0);
     }, [runId]);
 
     // Hydrate stream once per run (avoid clobbering optimistic UI)
@@ -202,29 +307,32 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
         setLocalStream(prev => [...prev, item]);
     }, [lastEvent, currentPhase]);
 
-    const updateSlashStateFromInput = (nextValue: string) => {
+    const updateAutocompleteFromInput = (nextValue: string) => {
         const el = textareaRef.current;
         const cursor = el?.selectionStart ?? nextValue.length;
 
         const beforeCursor = nextValue.slice(0, cursor);
-        const match = beforeCursor.match(/(^|[\s\n])\/([a-zA-Z0-9-_]*)$/);
+        const match = beforeCursor.match(/(^|[\s\n])([/@!])([a-zA-Z0-9-_]*)$/);
         if (!match) {
-            setSlashMenuOpen(false);
-            setSlashQuery('');
-            setSlashActiveIndex(0);
+            setAutocompleteOpen(false);
+            setAutocompleteQuery('');
+            setAutocompleteActiveIndex(0);
             return;
         }
 
-        setSlashMenuOpen(true);
-        setSlashQuery(match[2] || '');
-        setSlashActiveIndex(0);
+        const prefix = match[2];
+        const kind = prefix === '/' ? 'slash' : prefix === '@' ? 'mention' : 'macro';
+        setAutocompleteKind(kind);
+        setAutocompleteOpen(true);
+        setAutocompleteQuery(match[3] || '');
+        setAutocompleteActiveIndex(0);
     };
 
-    const insertSlashCommand = (command: SlashCommand) => {
+    const insertAutocompleteItem = (item: AutocompleteItem) => {
         const el = textareaRef.current;
         if (!el) {
-            setInputValue(command.insert);
-            setSlashMenuOpen(false);
+            setInputValue(item.insert);
+            setAutocompleteOpen(false);
             return;
         }
 
@@ -232,64 +340,294 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
         const beforeCursor = inputValue.slice(0, cursor);
         const afterCursor = inputValue.slice(cursor);
 
-        const match = beforeCursor.match(/(^|[\s\n])\/([a-zA-Z0-9-_]*)$/);
+        const match = beforeCursor.match(/(^|[\s\n])([/@!])([a-zA-Z0-9-_]*)$/);
         if (!match) {
-            setInputValue(command.insert);
-            setSlashMenuOpen(false);
+            setInputValue(item.insert);
+            setAutocompleteOpen(false);
             return;
         }
 
-        const startIndex = beforeCursor.length - (`/${match[2] || ''}`).length;
-        const next = `${inputValue.slice(0, startIndex)}${command.insert}${afterCursor.replace(/^\s+/, '')}`;
+        const triggerLength = `${match[2]}${match[3] || ''}`.length;
+        const startIndex = beforeCursor.length - triggerLength;
+        const next = `${inputValue.slice(0, startIndex)}${item.insert}${afterCursor.replace(/^\s+/, '')}`;
         setInputValue(next);
-        setSlashMenuOpen(false);
-        setSlashQuery('');
-        setSlashActiveIndex(0);
+        setAutocompleteOpen(false);
+        setAutocompleteQuery('');
+        setAutocompleteActiveIndex(0);
 
         requestAnimationFrame(() => {
-            const nextCursor = startIndex + command.insert.length;
+            const nextCursor = startIndex + item.insert.length;
             el.focus();
             el.setSelectionRange(nextCursor, nextCursor);
         });
     };
 
     useEffect(() => {
-        if (!slashMenuOpen) return;
-        if (filteredSlashCommands.length === 0) return;
-        setSlashActiveIndex((prev) => Math.min(prev, filteredSlashCommands.length - 1));
-    }, [slashMenuOpen, filteredSlashCommands.length]);
+        if (!autocompleteOpen) return;
+        if (filteredAutocompleteItems.length === 0) return;
+        setAutocompleteActiveIndex((prev) => Math.min(prev, filteredAutocompleteItems.length - 1));
+    }, [autocompleteOpen, filteredAutocompleteItems.length]);
+
+    useEffect(() => {
+        setChatHistory((prev) => {
+            const nextPrompt = buildSystemPrompt(memoryNotes, pinnedNotes, workingGoal);
+            if (prev.length === 0) return [{ role: 'system', content: nextPrompt }];
+            if (prev[0]?.role === 'system' && prev[0].content === nextPrompt) return prev;
+            const next = [...prev];
+            next[0] = { role: 'system', content: nextPrompt };
+            return next;
+        });
+    }, [memoryNotes, pinnedNotes, workingGoal]);
+
+    const appendSystemLog = (title: string, content: string, severity: 'info' | 'warn' | 'error' = 'info') => {
+        const item: StreamItem = {
+            id: `sys-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            runId,
+            type: severity === 'error' ? 'error' : 'log',
+            title,
+            content,
+            timestamp: new Date().toLocaleTimeString(),
+            phase: currentPhase,
+            agentId: 'SYSTEM',
+            severity
+        };
+        setLocalStream((prev) => [...prev, item]);
+    };
+
+    const flashGoalStatus = (message: string, tone: 'ok' | 'warn') => {
+        if (goalStatusTimerRef.current) {
+            clearTimeout(goalStatusTimerRef.current);
+        }
+        setGoalStatus({ message, tone });
+        goalStatusTimerRef.current = setTimeout(() => {
+            setGoalStatus(null);
+        }, 2000);
+    };
+
+    const truncateText = (value: string, max = 360) => {
+        if (value.length <= max) return value;
+        return `${value.slice(0, max)}...`;
+    };
+
+    const addPinnedNote = (note: string, source: string) => {
+        const trimmed = note.trim();
+        if (!trimmed) {
+            appendSystemLog('Pin', 'No text selected to pin.', 'warn');
+            return;
+        }
+        const normalized = truncateText(trimmed.replace(/\s+/g, ' '));
+        setPinnedNotes((prev) => [...prev, normalized]);
+        appendSystemLog('Pin', `Pinned from ${source}.`);
+    };
+
+    const handlePinSelection = () => {
+        const selection = window.getSelection()?.toString() ?? '';
+        addPinnedNote(selection, 'selection');
+    };
+
+    const latestTerminalOutput = useMemo(() => {
+        for (let i = localStream.length - 1; i >= 0; i -= 1) {
+            const item = localStream[i];
+            if (item.type === 'command' || (item.type === 'error' && item.agentId !== 'USER')) {
+                return item;
+            }
+        }
+        return null;
+    }, [localStream]);
+
+    const handlePinLatestOutput = () => {
+        if (!latestTerminalOutput) {
+            appendSystemLog('Pin', 'No terminal output to pin yet.', 'warn');
+            return;
+        }
+        addPinnedNote(latestTerminalOutput.content, 'terminal output');
+    };
+
+    const isLikelyTerminalCommand = (text: string) => {
+        if (text.startsWith('$')) return true;
+        if (text.startsWith('./') || text.startsWith('../')) return true;
+        if (/[|&]{2}|\|/.test(text)) return true;
+        return /^(npm|npx|pnpm|yarn|bun|git|ls|cd|cat|rg|grep|node|python|pip|docker|kubectl|make|tsc|eslint)\b/i.test(text);
+    };
+
+    const parseInput = (raw: string): ParsedInput => {
+        let text = raw.trim();
+        if (!text) return { mode: 'chat' as const, payload: '' };
+
+        let agentTarget: MentionTarget | undefined;
+        const agentMatch = text.match(/^@([a-zA-Z0-9-_]+)\s+/);
+        if (agentMatch) {
+            agentTarget = mentionLookup.get(agentMatch[1].toLowerCase());
+            text = text.replace(/^@([a-zA-Z0-9-_]+)\s+/, '');
+        }
+
+        if (text.startsWith('!')) {
+            const macroMatch = text.match(/^!([a-zA-Z0-9-_]+)/);
+            const macro = macroMatch ? macroLookup.get(macroMatch[1].toLowerCase()) : undefined;
+            if (macro) {
+                return { mode: 'terminal' as const, payload: macro.command, macro, agentTarget };
+            }
+        }
+
+        if (text.startsWith('/')) {
+            const match = text.match(/^\/([a-zA-Z0-9-_]+)(?:\s+(.*))?$/);
+            if (match) {
+                const command = match[1].toLowerCase();
+                const arg = (match[2] ?? '').trim();
+
+                if (command === 'chat' || command === 'llm') {
+                    return { mode: 'chat' as const, payload: arg, command, agentTarget };
+                }
+                if (command === 'exec' || command === 'cmd') {
+                    return { mode: 'terminal' as const, payload: arg, command, agentTarget };
+                }
+                if (['help', 'models', 'clear', 'remember', 'pin', 'goal', 'init'].includes(command)) {
+                    return { mode: 'system' as const, payload: arg, command, agentTarget };
+                }
+            }
+        }
+
+        const mode = isLikelyTerminalCommand(text)
+            ? 'terminal'
+            : (currentPhase === 'plan' || currentPhase === 'review' ? 'chat' : 'terminal');
+        return { mode, payload: text, agentTarget };
+    };
+
+    const handleSystemCommand = async (command?: string, payload?: string) => {
+        if (!command) return;
+        switch (command) {
+            case 'help': {
+                appendSystemLog(
+                    'Omnibar Help',
+                    [
+                        'Commands:',
+                        '- /help, /models, /clear, /remember <note>, /pin <note>, /goal <text>',
+                        '- /chat <prompt>, /llm <prompt>, /exec <cmd>, /cmd <cmd>',
+                        'Mentions:',
+                        '- @plan, @build, @review, @deploy',
+                        '- @engineer, @designer, @reviewer',
+                        '- @build-helper, @frontend-designer, @code-reviewer (beta)',
+                        'Macros:',
+                        '- !test, !lint, !build'
+                    ].join('\n')
+                );
+                return;
+            }
+            case 'models': {
+                appendSystemLog('Ollama Models', 'Fetching available models...');
+                try {
+                    const res = await fetch('/api/ollama?action=models');
+                    if (!res.ok) {
+                        const text = await res.text();
+                        appendSystemLog('Ollama Models', `Failed: ${text.substring(0, 200)}`, 'warn');
+                        return;
+                    }
+                    const data = await res.json();
+                    const models = Array.isArray(data?.models) ? data.models : [];
+                    const names = models.map((m: { name?: string }) => m?.name).filter(Boolean);
+                    appendSystemLog('Ollama Models', names.length ? names.join('\n') : 'No models found.');
+                } catch (error) {
+                    appendSystemLog('Ollama Models', error instanceof Error ? error.message : String(error), 'warn');
+                }
+                return;
+            }
+            case 'clear': {
+                const item: StreamItem = {
+                    id: `sys-clear-${Date.now()}`,
+                    runId,
+                    type: 'log',
+                    title: 'Omnibar',
+                    content: 'Cleared local output.',
+                    timestamp: new Date().toLocaleTimeString(),
+                    phase: currentPhase,
+                    agentId: 'SYSTEM',
+                    severity: 'info'
+                };
+                setLocalStream([item]);
+                return;
+            }
+            case 'remember': {
+                if (!payload) {
+                    appendSystemLog('Remember', 'Missing note. Usage: /remember <note>', 'warn');
+                    return;
+                }
+                const normalized = truncateText(payload.trim().replace(/\s+/g, ' '));
+                if (!normalized) {
+                    appendSystemLog('Remember', 'Missing note. Usage: /remember <note>', 'warn');
+                    return;
+                }
+                setMemoryNotes((prev) => [...prev, normalized]);
+                appendSystemLog('Remember', `Saved: ${normalized}`);
+                return;
+            }
+            case 'pin': {
+                if (!payload) {
+                    appendSystemLog('Pin', 'Missing note. Usage: /pin <note>', 'warn');
+                    return;
+                }
+                const normalized = truncateText(payload.trim().replace(/\s+/g, ' '));
+                if (!normalized) {
+                    appendSystemLog('Pin', 'Missing note. Usage: /pin <note>', 'warn');
+                    return;
+                }
+                setPinnedNotes((prev) => [...prev, normalized]);
+                appendSystemLog('Pin', `Pinned: ${normalized}`);
+                return;
+            }
+            case 'goal': {
+                if (!payload) {
+                    appendSystemLog('Goal', 'Missing goal. Usage: /goal <text>', 'warn');
+                    flashGoalStatus('Missing goal text after /goal', 'warn');
+                    return;
+                }
+                const normalized = truncateText(payload.trim().replace(/\s+/g, ' '), 240);
+                if (!normalized) {
+                    appendSystemLog('Goal', 'Missing goal. Usage: /goal <text>', 'warn');
+                    flashGoalStatus('Missing goal text after /goal', 'warn');
+                    return;
+                }
+                setWorkingGoal(normalized);
+                appendSystemLog('Goal', `Working goal set: ${normalized}`);
+                flashGoalStatus('Working goal updated', 'ok');
+                return;
+            }
+            case 'init': {
+                appendSystemLog('Init', 'Init command acknowledged (placeholder).');
+                return;
+            }
+            default:
+                appendSystemLog('Command', `Unknown command: /${command}`, 'warn');
+        }
+    };
 
     const handleSend = async () => {
         if (!inputValue.trim()) return;
         
-        const trimmed = inputValue.trim();
-        let mode: 'chat' | 'command' = 'command';
-        let payload = trimmed;
+        const parsed = parseInput(inputValue);
+        if (parsed.mode !== 'system' && !parsed.payload) return;
 
-        // 1. Determine Mode & Payload
-        if (trimmed.startsWith('/llm ') || trimmed.startsWith('/chat ')) {
-            mode = 'chat';
-            payload = trimmed.replace(/^(\/llm|\/chat)\s+/, '');
-        } else if (trimmed.startsWith('/exec ') || trimmed.startsWith('/cmd ')) {
-            mode = 'command';
-            payload = trimmed.replace(/^(\/exec|\/cmd)\s+/, '');
-        } else {
-            // Context-aware defaults
-            if (currentPhase === 'plan' || currentPhase === 'review') {
-                mode = 'chat';
-            } else {
-                mode = 'command';
-            }
+        setInputValue('');
+        setAutocompleteOpen(false);
+
+        if (parsed.mode === 'system') {
+            await handleSystemCommand(parsed.command, parsed.payload);
+            return;
         }
 
-        if (!payload) return;
+        const agentPrefix = parsed.agentTarget ? `[${parsed.agentTarget.label}] ` : '';
+        const payload = `${agentPrefix}${parsed.payload}`;
+        const title = parsed.macro
+            ? `Macro ${parsed.macro.label}`
+            : parsed.mode === 'chat'
+                ? 'User Prompt'
+                : 'User Command';
 
         // 2. Optimistic UI Update
         const userMsg: StreamItem = {
             id: Date.now().toString(),
             runId,
             type: 'log',
-            title: mode === 'chat' ? 'User Prompt' : 'User Command',
+            title,
             content: payload,
             timestamp: new Date().toLocaleTimeString(),
             phase: currentPhase,
@@ -298,10 +636,9 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
             isUser: true
         };
         setLocalStream(prev => [...prev, userMsg]);
-        setInputValue('');
 
         // 3. Dispatch Logic
-        if (mode === 'chat') {
+        if (parsed.mode === 'chat') {
             const nextHistory = capChatHistory([...chatHistory, { role: 'user', content: payload }]);
             setChatHistory(nextHistory);
 
@@ -328,7 +665,7 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                 }
             }
         } else {
-            // Command Mode
+            // Terminal Mode
             if (client) {
                 const intent: ExecCmdIntent = {
                     type: 'INTENT_EXEC_CMD',
@@ -420,6 +757,84 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                 </div>
             </div>
 
+            {/* Context Shelf */}
+            <div className="px-6 py-3 border-b border-white/5 bg-black/30">
+                <div className="flex items-center justify-between text-[10px] uppercase tracking-widest text-white/40">
+                    <span>Context Shelf</span>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={handlePinSelection}
+                            className="px-2 py-1 rounded border border-white/10 text-white/60 hover:text-white hover:border-white/30 transition-colors"
+                        >
+                            Pin selection
+                        </button>
+                    </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+                    <div className="flex flex-col gap-2">
+                        <div className="text-[10px] uppercase tracking-widest text-white/30">Working goal</div>
+                        <input
+                            value={workingGoal}
+                            onChange={(e) => {
+                                setWorkingGoal(e.target.value);
+                                setGoalStatus(null);
+                            }}
+                            placeholder="What are we trying to do?"
+                            className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-white/80 placeholder:text-white/20 focus:outline-none focus:border-white/30"
+                        />
+                        {goalStatus && (
+                            <div className={clsx(
+                                "text-[10px] uppercase tracking-widest",
+                                goalStatus.tone === 'ok' ? "text-emerald-400/80" : "text-amber-400/80"
+                            )}>
+                                {goalStatus.message}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                        <div className="flex items-center justify-between text-[10px] uppercase tracking-widest text-white/30">
+                            <span>Latest terminal output</span>
+                            <button
+                                type="button"
+                                onClick={handlePinLatestOutput}
+                                className="text-[10px] text-white/40 hover:text-white transition-colors"
+                            >
+                                Pin output
+                            </button>
+                        </div>
+                        <div className="min-h-[56px] rounded border border-white/10 bg-black/40 p-2 text-xs text-white/70 whitespace-pre-wrap">
+                            {latestTerminalOutput ? truncateText(latestTerminalOutput.content, 220) : 'No terminal output yet.'}
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                        <div className="text-[10px] uppercase tracking-widest text-white/30">Pinned</div>
+                        <div className="min-h-[56px] rounded border border-white/10 bg-black/40 p-2 text-xs text-white/70 space-y-2 max-h-28 overflow-y-auto">
+                            {pinnedNotes.length === 0 && (
+                                <div className="text-white/30">Pin text from output to keep context.</div>
+                            )}
+                            {pinnedNotes.map((note, idx) => (
+                                <div key={`${note}-${idx}`} className="flex items-start gap-2">
+                                    <span className="text-white/40">•</span>
+                                    <span className="flex-1">{note}</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setPinnedNotes((prev) => prev.filter((_, i) => i !== idx))}
+                                        className="text-white/30 hover:text-white/70 transition-colors"
+                                        aria-label="Remove pinned note"
+                                    >
+                                        x
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             {/* Stream Area - Vertical Timeline OR Shadow Terminal */}
             <div
                 className="flex-1 overflow-hidden relative"
@@ -437,26 +852,26 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                     "relative group flex items-stretch overflow-hidden",
                     // Removed background, just border and glowing text
                 )}>
-                    {/* Slash Menu */}
-                    {slashMenuOpen && filteredSlashCommands.length > 0 && (
+                    {/* Autocomplete Menu */}
+                    {autocompleteOpen && filteredAutocompleteItems.length > 0 && (
                         <div className="absolute bottom-full left-0 right-0 mb-2 z-50">
                             <div className="mx-2 rounded-lg border border-white/10 bg-black/90 shadow-xl overflow-hidden">
                                 <div className="px-3 py-2 text-[10px] text-white/40 font-mono border-b border-white/10">
-                                    Commands
+                                    {autocompleteKind === 'slash' ? 'Commands' : autocompleteKind === 'mention' ? 'Agents' : 'Macros'}
                                 </div>
                                 <div className="max-h-56 overflow-y-auto">
-                                    {filteredSlashCommands.map((cmd, idx) => (
+                                    {filteredAutocompleteItems.map((cmd, idx) => (
                                         <button
                                             key={cmd.id}
                                             type="button"
-                                            onMouseEnter={() => setSlashActiveIndex(idx)}
+                                            onMouseEnter={() => setAutocompleteActiveIndex(idx)}
                                             onMouseDown={(e) => e.preventDefault()}
-                                            onClick={() => insertSlashCommand(cmd)}
+                                            onClick={() => insertAutocompleteItem(cmd)}
                                             className={clsx(
                                                 "w-full text-left px-3 py-2 flex items-start gap-3 font-mono",
-                                                idx === slashActiveIndex ? "bg-white/10" : "bg-transparent hover:bg-white/5"
+                                                idx === autocompleteActiveIndex ? "bg-white/10" : "bg-transparent hover:bg-white/5"
                                             )}
-                                            aria-selected={idx === slashActiveIndex}
+                                            aria-selected={idx === autocompleteActiveIndex}
                                         >
                                             <div className="text-white/90 text-xs w-16 shrink-0">{cmd.label}</div>
                                             <div className="text-white/40 text-xs">{cmd.description}</div>
@@ -475,49 +890,81 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                         <span className="font-mono text-lg">❯</span>
                     </div>
 
-                    <textarea
-                        ref={textareaRef}
-                        value={inputValue}
-                        onChange={(e) => {
-                            const next = e.target.value;
-                            setInputValue(next);
-                            updateSlashStateFromInput(next);
-                        }}
-                         onKeyDown={(e) => {
-                             if (slashMenuOpen) {
-                                 if (e.key === 'Escape') {
-                                     e.preventDefault();
-                                     setSlashMenuOpen(false);
-                                     return;
-                                 }
-                                 if (e.key === 'ArrowDown') {
-                                     e.preventDefault();
-                                     setSlashActiveIndex((prev) => Math.min(prev + 1, filteredSlashCommands.length - 1));
-                                     return;
-                                 }
-                                 if (e.key === 'ArrowUp') {
-                                     e.preventDefault();
-                                     setSlashActiveIndex((prev) => Math.max(prev - 1, 0));
-                                     return;
-                                 }
-                                 if (e.key === 'Enter' || e.key === 'Tab') {
-                                     const cmd = filteredSlashCommands[slashActiveIndex];
-                                     if (cmd) {
-                                         e.preventDefault();
-                                         insertSlashCommand(cmd);
-                                         return;
-                                     }
-                                 }
-                             }
+                    <div className="flex-1 flex flex-col py-2">
+                        <div className="flex flex-wrap gap-1 min-h-[18px] text-[10px] uppercase tracking-wider text-white/40">
+                            {(() => {
+                                const preview = parseInput(inputValue);
+                                if (!inputValue.trim()) return null;
 
-                             if (e.key === 'Enter' && !e.shiftKey) {
-                                 e.preventDefault();
-                                 void handleSend();
-                             }
-                         }}
-                        placeholder={config.placeholder}
-                        className="flex-1 bg-transparent border-none focus:ring-0 text-white/90 placeholder:text-white/20 resize-none py-3 px-0 min-h-[48px] max-h-[200px] text-sm font-mono leading-relaxed focus:outline-none"
-                    />
+                                const chips: { label: string; tone: string }[] = [];
+                                const modeLabel = preview.mode === 'terminal' ? 'Terminal' : preview.mode === 'chat' ? 'Chat' : 'Command';
+                                chips.push({ label: modeLabel, tone: preview.mode === 'terminal' ? 'border-emerald-500/30 text-emerald-300/80' : preview.mode === 'chat' ? 'border-sapphire-500/30 text-sapphire-300/80' : 'border-amber-500/30 text-amber-300/80' });
+                                if (preview.agentTarget) {
+                                    chips.push({ label: `Agent: ${preview.agentTarget.label.replace('@', '').toUpperCase()}`, tone: 'border-cyan-500/30 text-cyan-300/80' });
+                                }
+                                if (preview.command) {
+                                    chips.push({ label: `/${preview.command}`, tone: 'border-white/20 text-white/50' });
+                                }
+                                if (preview.macro) {
+                                    chips.push({ label: `Macro: ${preview.macro.label}`, tone: 'border-emerald-500/20 text-emerald-300/70' });
+                                }
+                                return chips.map((chip) => (
+                                    <span
+                                        key={chip.label}
+                                        className={clsx(
+                                            "px-2 py-0.5 rounded-full border bg-black/30",
+                                            chip.tone
+                                        )}
+                                    >
+                                        {chip.label}
+                                    </span>
+                                ));
+                            })()}
+                        </div>
+                        <textarea
+                            ref={textareaRef}
+                            value={inputValue}
+                            onChange={(e) => {
+                                const next = e.target.value;
+                                setInputValue(next);
+                                updateAutocompleteFromInput(next);
+                            }}
+                            onKeyDown={(e) => {
+                                if (autocompleteOpen) {
+                                    if (e.key === 'Escape') {
+                                        e.preventDefault();
+                                        setAutocompleteOpen(false);
+                                        return;
+                                    }
+                                    if (e.key === 'ArrowDown') {
+                                        e.preventDefault();
+                                        setAutocompleteActiveIndex((prev) => Math.min(prev + 1, filteredAutocompleteItems.length - 1));
+                                        return;
+                                    }
+                                    if (e.key === 'ArrowUp') {
+                                        e.preventDefault();
+                                        setAutocompleteActiveIndex((prev) => Math.max(prev - 1, 0));
+                                        return;
+                                    }
+                                    if (e.key === 'Enter' || e.key === 'Tab') {
+                                        const cmd = filteredAutocompleteItems[autocompleteActiveIndex];
+                                        if (cmd) {
+                                            e.preventDefault();
+                                            insertAutocompleteItem(cmd);
+                                            return;
+                                        }
+                                    }
+                                }
+
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    void handleSend();
+                                }
+                            }}
+                            placeholder={config.placeholder}
+                            className="flex-1 bg-transparent border-none focus:ring-0 text-white/90 placeholder:text-white/20 resize-none px-0 min-h-[48px] max-h-[200px] text-sm font-mono leading-relaxed focus:outline-none"
+                        />
+                    </div>
 
                     <div className="flex flex-col justify-end p-2">
                          <button
