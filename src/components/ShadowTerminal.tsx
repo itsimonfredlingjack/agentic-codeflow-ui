@@ -4,7 +4,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { ActionCard } from './ActionCard';
 import { ActionCardProps } from '@/types';
 import { AnimatePresence } from 'framer-motion';
-import { List, CreditCard, Filter, Search, ArrowDown } from 'lucide-react';
+import { List, CreditCard, Search, ArrowDown, Pause, Play } from 'lucide-react';
 import clsx from 'clsx';
 
 interface ShadowTerminalProps {
@@ -12,26 +12,35 @@ interface ShadowTerminalProps {
 }
 
 type ViewMode = 'cards' | 'raw';
-type StreamTab = 'chat' | 'logs';
+type StreamCategory = 'chat' | 'terminal' | 'agent' | 'error';
 
 export function ShadowTerminal({ actions }: ShadowTerminalProps) {
     const bottomRef = useRef<HTMLDivElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const [viewMode, setViewMode] = useState<ViewMode>('cards');
-    const [tab, setTab] = useState<StreamTab>('chat');
     const [autoScroll, setAutoScroll] = useState(true);
     const SCROLL_BOTTOM_THRESHOLD_PX = 24;
 
     // Power Tools (v3.0)
-    const [filterErrors, setFilterErrors] = useState(false);
+    const [showChat, setShowChat] = useState(true);
+    const [showTerminal, setShowTerminal] = useState(true);
+    const [showAgent, setShowAgent] = useState(true);
+    const [showErrors, setShowErrors] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
 
     // Apply filters
     const visibleActions = actions.filter(a => {
         const isChat = (a.agentId === 'USER' || a.agentId === 'QWEN') && a.type !== 'command';
-        if (tab === 'chat' && !isChat) return false;
-        if (tab === 'logs' && isChat) return false;
-        if (filterErrors && a.type !== 'error') return false;
+        const isTerminal = a.type === 'command' || a.title === 'STDOUT' || a.title === 'STDERR';
+        const isError = a.type === 'error' || a.severity === 'error';
+        const category: StreamCategory = isError ? 'error' : isChat ? 'chat' : isTerminal ? 'terminal' : 'agent';
+        const categoryEnabled = (
+            (category === 'chat' && showChat) ||
+            (category === 'terminal' && showTerminal) ||
+            (category === 'agent' && showAgent) ||
+            (category === 'error' && showErrors)
+        );
+        if (!categoryEnabled) return false;
         if (searchQuery) {
             const query = searchQuery.toLowerCase();
             return a.title.toLowerCase().includes(query) || a.content.toLowerCase().includes(query);
@@ -47,7 +56,7 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
         });
 
         return () => cancelAnimationFrame(raf);
-    }, [visibleActions.length, autoScroll, viewMode, tab]);
+    }, [visibleActions.length, autoScroll, viewMode]);
 
     return (
         <div
@@ -63,32 +72,26 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
             {/* Header / Toolbar */}
             <div className="h-12 border-b border-white/10 flex items-center px-4 justify-between bg-black/40 z-10 gap-4">
                 <div className="flex items-center gap-4 flex-1">
-                    {/* Tabs */}
+                    {/* Filters */}
                     <div className="flex items-center bg-black/30 rounded-lg p-1 gap-1 border border-white/10">
-                        <button
-                            onClick={() => setTab('chat')}
-                            className={clsx(
-                                "px-2.5 py-1 rounded text-xs font-mono transition-all duration-fast",
-                                tab === 'chat'
-                                    ? "bg-white/10 text-white shadow-sm"
-                                    : "text-white/40 hover:text-white/80 hover:bg-white/5 active:scale-95"
-                            )}
-                            aria-pressed={tab === 'chat'}
-                        >
-                            Chat
-                        </button>
-                        <button
-                            onClick={() => setTab('logs')}
-                            className={clsx(
-                                "px-2.5 py-1 rounded text-xs font-mono transition-all duration-fast",
-                                tab === 'logs'
-                                    ? "bg-white/10 text-white shadow-sm"
-                                    : "text-white/40 hover:text-white/80 hover:bg-white/5 active:scale-95"
-                            )}
-                            aria-pressed={tab === 'logs'}
-                        >
-                            Logs
-                        </button>
+                        {[
+                            { id: 'chat', label: 'Chat', active: showChat, onClick: () => setShowChat((prev) => !prev) },
+                            { id: 'terminal', label: 'Terminal', active: showTerminal, onClick: () => setShowTerminal((prev) => !prev) },
+                            { id: 'agent', label: 'Agent', active: showAgent, onClick: () => setShowAgent((prev) => !prev) },
+                            { id: 'error', label: 'Errors', active: showErrors, onClick: () => setShowErrors((prev) => !prev) },
+                        ].map((chip) => (
+                            <button
+                                key={chip.id}
+                                onClick={chip.onClick}
+                                className={clsx(
+                                    "px-2 py-1 rounded text-xs font-mono transition-colors",
+                                    chip.active ? "bg-white/10 text-white" : "text-white/40 hover:text-white/80"
+                                )}
+                                aria-pressed={chip.active}
+                            >
+                                {chip.label}
+                            </button>
+                        ))}
                     </div>
 
                     {/* Search Bar */}
@@ -96,29 +99,15 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
                         <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-white/30 group-focus-within:text-white/70 transition-colors" />
                         <input
                             type="text"
-                            placeholder={tab === 'chat' ? 'Search chat...' : 'Search logs...'}
+                            placeholder="Search stream..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             className="w-full bg-black/30 border border-white/10 rounded text-xs py-1.5 pl-7 pr-2 text-white placeholder-white/20 focus:outline-none focus:bg-black/40 focus:border-white/20 transition-all font-mono"
                         />
                     </div>
-
-                    {/* Filter Toggle */}
-                    <button
-                        onClick={() => setFilterErrors(!filterErrors)}
-                        className={clsx(
-                            "flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-mono border transition-all duration-fast active:scale-95",
-                            filterErrors
-                                ? "bg-red-500/20 border-red-500/30 text-red-300 shadow-sm"
-                                : "bg-transparent border-transparent text-white/40 hover:bg-white/5 hover:text-white/60"
-                        )}
-                    >
-                        <Filter size={12} />
-                        <span>{filterErrors ? 'Errors Only' : 'All Events'}</span>
-                    </button>
                 </div>
 
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3">
                     {/* View Toggle */}
                     <div className="flex items-center bg-black/30 rounded-lg p-1 gap-1 border border-white/10">
                         <button
@@ -148,7 +137,31 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
                             <List size={14} />
                         </button>
                     </div>
-                    <div className="text-xs font-mono text-white/40 hidden md:block">TERMINAL</div>
+                    <button
+                        onClick={() => setAutoScroll((prev) => !prev)}
+                        className={clsx(
+                            "flex items-center gap-1.5 px-2 py-1.5 rounded text-xs font-mono border transition-all",
+                            autoScroll ? "bg-white/10 border-white/20 text-white" : "bg-transparent border-white/10 text-white/40 hover:text-white/80"
+                        )}
+                        aria-pressed={autoScroll}
+                    >
+                        {autoScroll ? <Play size={12} /> : <Pause size={12} />}
+                        <span>{autoScroll ? 'Auto-scroll on' : 'Auto-scroll off'}</span>
+                    </button>
+                    <button
+                        onClick={() => {
+                            setAutoScroll(true);
+                            bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                        }}
+                        className={clsx(
+                            "flex items-center gap-1.5 px-2 py-1.5 rounded text-xs font-mono border transition-all",
+                            autoScroll ? "border-white/10 text-white/40 hover:text-white/80" : "bg-white/10 border-white/20 text-white"
+                        )}
+                    >
+                        <ArrowDown size={12} />
+                        <span>Jump to latest</span>
+                    </button>
+                    <div className="text-xs font-mono text-white/40 hidden md:block">STREAM</div>
                 </div>
             </div>
 
@@ -189,6 +202,7 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
             <div className="p-3 border-t border-white/10 bg-black/40 flex gap-2 font-mono text-sm shadow-2xl">
                 <span className="text-emerald-500">❯</span>
                 <span className="text-white/50">Output stream</span>
+<<<<<<< HEAD
                 {!autoScroll && (
                     <button
                         onClick={() => {
@@ -201,6 +215,8 @@ export function ShadowTerminal({ actions }: ShadowTerminalProps) {
                         Jump to latest
                     </button>
                 )}
+=======
+>>>>>>> e3cb78bb39bfcca3635a985a031154fe492e278a
             </div>
         </div>
     );
