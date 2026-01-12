@@ -19,6 +19,9 @@ module.exports = {
             transitionTimingFunction: {
                 'out-expo': 'cubic-bezier(0.16, 1, 0.3, 1)',
             },
+            fontSize: {
+                tiny: '0.625rem', // 10px
+            },
         },
     },
     plugins: [],

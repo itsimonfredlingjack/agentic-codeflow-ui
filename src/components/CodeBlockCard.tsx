@@ -4,37 +4,8 @@ import React, { useState } from 'react';
 import { Check, Copy, Terminal, Maximize2 } from 'lucide-react';
 import clsx from 'clsx';
 import { motion } from 'framer-motion';
-
-// Simple Regex Syntax Highlighter
-const highlightSyntax = (code: string, _: string) => {
-    // Escape HTML to prevent injection
-    let html = code
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
-
-    // Keywords (Purple/Pink)
-    html = html.replace(/\b(const|let|var|function|return|import|export|from|class|extends|if|else|for|while|try|catch|async|await)\b/g,
-        '<span class="text-purple-400 font-bold">$1</span>');
-
-    // Types (Yellow/Orange)
-    html = html.replace(/\b(string|number|boolean|any|void|Promise|React|interface|type)\b/g,
-        '<span class="text-yellow-300">$1</span>');
-
-    // Strings (Green)
-    html = html.replace(/(['"`])(.*?)\1/g,
-        '<span class="text-emerald-300">$1$2$1</span>');
-
-    // Functions (Blue)
-    html = html.replace(/\b([a-zA-Z0-9_]+)(?=\()/g,
-        '<span class="text-blue-300">$1</span>');
-
-    // Comments (Gray)
-    html = html.replace(/(\/\/.*)/g,
-        '<span class="text-gray-500 italic">$1</span>');
-
-    return html;
-};
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 interface CodeBlockCardProps {
     code: string;
@@ -116,15 +87,28 @@ export function CodeBlockCard({ code, language = 'typescript', filename }: CodeB
 
             {/* Code Content */}
             <div className={clsx(
-                "p-4 overflow-x-auto text-sm leading-relaxed custom-scrollbar",
-                isMaximized ? "h-[calc(100%-48px)]" : "max-h-[400px]"
+                "overflow-hidden text-sm leading-relaxed custom-scrollbar bg-[#1e1e1e]",
+                isMaximized ? "h-[calc(100%-48px)] overflow-y-auto" : "max-h-[400px]"
             )}>
-                <pre>
-                    <code
-                        className="text-white/80"
-                        dangerouslySetInnerHTML={{ __html: highlightSyntax(code, language) }}
-                    />
-                </pre>
+                 <SyntaxHighlighter
+                    language={language || 'text'}
+                    style={vscDarkPlus}
+                    customStyle={{
+                        margin: 0,
+                        background: 'transparent',
+                        padding: '16px',
+                        fontSize: '13px',
+                        lineHeight: 1.6,
+                    }}
+                    codeTagProps={{
+                        style: {
+                            fontFamily:
+                                'var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                        },
+                    }}
+                >
+                    {code}
+                </SyntaxHighlighter>
             </div>
 
             {/* Status Bar */}
@@ -132,12 +116,8 @@ export function CodeBlockCard({ code, language = 'typescript', filename }: CodeB
                 <span>master*</span>
                 <span className="opacity-80">Ln {code.split('\n').length}, Col 1</span>
                 <span className="ml-auto opacity-80">UTF-8</span>
-                <span className="opacity-80">TypeScript React</span>
+                <span className="opacity-80">{language}</span>
             </div>
         </motion.div>
     );
 }
-
-// Add simple CSS for custom scrollbar if not exists
-// .custom-scrollbar::-webkit-scrollbar { height: 8px; width: 8px; }
-// .custom-scrollbar::-webkit-scrollbar-thumb { background: #424242; rounded: 4px; }

@@ -77,11 +77,11 @@ export class HostRuntime {
           eval_duration: response.eval_duration,
         },
       });
-    } catch (error: any) {
+    } catch (error) {
       this.emit({
         type: 'OLLAMA_ERROR',
         header: intent.header,
-        error: error.message || 'Failed to generate with Ollama',
+        error: error instanceof Error ? error.message : 'Failed to generate with Ollama',
         model: intent.model,
       });
     }
@@ -196,13 +196,13 @@ export class HostRuntime {
         header: intent.header,
         response: this.buildChatResponse(model, lastChunk, aggregatedContent),
       });
-    } catch (error: any) {
+    } catch (error) {
       // Emit failed event
       this.emit({
         type: 'OLLAMA_CHAT_FAILED',
         header: intent.header,
         model,
-        error: error.message || 'Failed to chat with Ollama',
+        error: error instanceof Error ? error.message : 'Failed to chat with Ollama',
       });
     }
   }

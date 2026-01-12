@@ -1,20 +1,19 @@
 // src/lib/ollamaClient.ts
 // Client-side helper for calling Ollama API
 
-export interface OllamaRequest {
-  action: 'generate' | 'chat';
-  model?: string;
-  prompt?: string;
-  messages?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
-  options?: {
-    temperature?: number;
-    top_p?: number;
-    top_k?: number;
-    num_predict?: number;
-  };
-}
+import type {
+  OllamaChatRequest,
+  OllamaChatResponse,
+  OllamaGenerateRequest,
+  OllamaGenerateResponse
+} from '@/types';
 
-export interface OllamaResponse {
+// Union type for the API request payload
+export type OllamaClientRequest =
+  | ({ action: 'generate' } & Omit<OllamaGenerateRequest, 'stream'>)
+  | ({ action: 'chat' } & Omit<OllamaChatRequest, 'stream'>);
+
+export interface OllamaClientResponse {
   success: boolean;
   model?: string;
   response?: string;
@@ -26,7 +25,7 @@ export interface OllamaResponse {
 /**
  * Call Ollama API from client
  */
-export async function callOllama(request: OllamaRequest): Promise<OllamaResponse> {
+export async function callOllama(request: OllamaClientRequest): Promise<OllamaClientResponse> {
   const response = await fetch('/api/ollama', {
     method: 'POST',
     headers: {
@@ -36,7 +35,7 @@ export async function callOllama(request: OllamaRequest): Promise<OllamaResponse
   });
 
   if (!response.ok) {
-    const error = await response.json();
+    const error = await response.json().catch(() => ({}));
     return {
       success: false,
       error: error.error || 'Failed to call Ollama API',
@@ -55,7 +54,7 @@ export async function listOllamaModels(): Promise<{ success: boolean; models?: a
   });
 
   if (!response.ok) {
-    const error = await response.json();
+    const error = await response.json().catch(() => ({}));
     return {
       success: false,
       error: error.error || 'Failed to list models',
