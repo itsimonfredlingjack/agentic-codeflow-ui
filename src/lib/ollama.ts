@@ -1,7 +1,13 @@
 // src/lib/ollama.ts
 // Model-agnostic Ollama service with proper error handling and streaming support
 
-import type { OllamaChatRequest, OllamaChatResponse, OllamaOptions } from '@/types';
+import type {
+  OllamaChatRequest,
+  OllamaChatResponse,
+  OllamaOptions,
+  OllamaGenerateRequest,
+  OllamaGenerateResponse
+} from '@/types';
 
 // Configuration from environment variables
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
@@ -38,31 +44,6 @@ export class OllamaHttpError extends OllamaError {
     super(message, statusCode);
     this.name = 'OllamaHttpError';
   }
-}
-
-// ============================================================================
-// Generate Interfaces (not in types.ts)
-// ============================================================================
-
-export interface OllamaGenerateRequest {
-  model?: string;
-  prompt: string;
-  stream?: boolean;
-  options?: OllamaOptions;
-}
-
-export interface OllamaGenerateResponse {
-  model: string;
-  created_at: string;
-  response: string;
-  done: boolean;
-  context?: number[];
-  total_duration?: number;
-  load_duration?: number;
-  prompt_eval_count?: number;
-  prompt_eval_duration?: number;
-  eval_count?: number;
-  eval_duration?: number;
 }
 
 // ============================================================================

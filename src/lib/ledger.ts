@@ -35,7 +35,8 @@ class TaskLedger {
       this.db.pragma('journal_mode = WAL'); 
       this.init();
     } catch (error) {
-      console.warn('better-sqlite3 not available, using in-memory fallback:', error);
+      const msg = error instanceof Error ? error.message : String(error);
+      console.warn('better-sqlite3 not available, using in-memory fallback:', msg);
       this.useInMemory = true;
       console.log('Running in in-memory mode - data will be lost on restart');
     }
@@ -173,7 +174,7 @@ class TaskLedger {
         stateValue: row.state_value,
         context: JSON.parse(row.context)
       };
-    } catch {
+    } catch (error) {
       return {
         stateValue: row.state_value,
         context: null

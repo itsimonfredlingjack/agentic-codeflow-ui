@@ -77,7 +77,7 @@ export class HostRuntime {
           eval_duration: response.eval_duration,
         },
       });
-    } catch (error: unknown) {
+    } catch (error) {
       this.emit({
         type: 'OLLAMA_ERROR',
         header: intent.header,
@@ -196,7 +196,7 @@ export class HostRuntime {
         header: intent.header,
         response: this.buildChatResponse(model, lastChunk, aggregatedContent),
       });
-    } catch (error: unknown) {
+    } catch (error) {
       // Emit failed event
       this.emit({
         type: 'OLLAMA_CHAT_FAILED',

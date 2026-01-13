@@ -277,12 +277,12 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
                 if (!res.ok) return;
 
                 const data = await res.json();
+                // History Loader: Fetch all events for this run.
+                // We do NOT filter by sessionStartRef here because we want to see past history on reload.
                 const filteredEvents = (data as RuntimeEvent[]).filter((event) => {
                     if (event.type === 'OLLAMA_BIT') return false;
                     if (event.type === 'OLLAMA_CHAT_STARTED') return false;
-                    const timestamp = event.header?.timestamp;
-                    if (typeof timestamp !== 'number') return false;
-                    return timestamp >= sessionStartRef.current;
+                    return true;
                 });
 
                 const mappedEvents: ActionCardProps[] = filteredEvents.map((event, index) =>
