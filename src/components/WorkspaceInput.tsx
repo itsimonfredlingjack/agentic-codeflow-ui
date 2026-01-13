@@ -3,10 +3,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import clsx from 'clsx';
 import { Send } from 'lucide-react';
-import type { AgentIntent } from '@/types';
 
-type ExecCmdIntent = Omit<Extract<AgentIntent, { type: 'INTENT_EXEC_CMD' }>, 'header'>;
-type OllamaChatIntent = Omit<Extract<AgentIntent, { type: 'INTENT_OLLAMA_CHAT' }>, 'header'>;
+
+
 
 type SlashCommand = {
     id: string;
@@ -219,10 +218,17 @@ export function WorkspaceInput({ currentPhase, config, onSend, onSystemCommand }
         });
     };
 
+    // Clamp active index when filtered items change (only when already open)
+    const prevFilteredLengthRef = useRef(filteredAutocompleteItems.length);
     useEffect(() => {
         if (!autocompleteOpen) return;
         if (filteredAutocompleteItems.length === 0) return;
-        setAutocompleteActiveIndex((prev) => Math.min(prev, filteredAutocompleteItems.length - 1));
+        // Only update if the length actually changed to avoid synchronous setState
+        if (prevFilteredLengthRef.current === filteredAutocompleteItems.length) return;
+        prevFilteredLengthRef.current = filteredAutocompleteItems.length;
+        queueMicrotask(() => {
+            setAutocompleteActiveIndex((prev) => Math.min(prev, filteredAutocompleteItems.length - 1));
+        });
     }, [autocompleteOpen, filteredAutocompleteItems.length]);
 
     const handleSend = async () => {
@@ -269,7 +275,7 @@ export function WorkspaceInput({ currentPhase, config, onSend, onSystemCommand }
                                             "w-full text-left px-3 py-2 flex items-start gap-3 font-mono",
                                             idx === autocompleteActiveIndex ? "bg-white/10" : "bg-transparent hover:bg-white/5"
                                         )}
-                                        aria-selected={idx === autocompleteActiveIndex}
+                                        data-selected={idx === autocompleteActiveIndex}
                                     >
                                         <div className="text-white/90 text-xs w-16 shrink-0">{cmd.label}</div>
                                         <div className="text-white/40 text-xs">{cmd.description}</div>

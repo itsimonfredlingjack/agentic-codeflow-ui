@@ -1,6 +1,6 @@
 import { AgentIntent, RuntimeEvent, MessageHeader } from '@/types';
 import { v4 as uuidv4 } from 'uuid';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 type ConnectionStatus = 'connecting' | 'open' | 'error' | 'closed';
 
@@ -142,15 +142,23 @@ export const agencyClient = new AgencyClient();
 export function useAgencyClient(runId: string | null) {
   const [lastEvent, setLastEvent] = useState<RuntimeEvent | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('closed');
+  const prevRunIdRef = useRef(runId);
 
   useEffect(() => {
-    if (!runId) {
-      setConnectionStatus('closed');
+    // Only update status on actual runId change to avoid synchronous setState
+    if (prevRunIdRef.current !== runId) {
+      prevRunIdRef.current = runId;
+      if (!runId) {
+        queueMicrotask(() => setConnectionStatus('closed'));
+        return;
+      }
+    } else if (!runId) {
+      // Initial mount with null runId - no need to call setState since initial state is 'closed'
       return;
     }
-    
+
     agencyClient.connect(runId);
-    
+
     const unsubscribe = agencyClient.subscribe((event) => {
       setLastEvent(event);
     });

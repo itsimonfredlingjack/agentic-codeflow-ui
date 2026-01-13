@@ -1,71 +1,75 @@
 "use client";
 
-import React, { useState } from 'react';
-import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
-import { ChevronRight, Unlock } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { CheckCircle } from 'lucide-react';
 import clsx from 'clsx';
+
+
 
 interface ReviewGateProps {
     onUnlock: () => void;
 }
 
 export function ReviewGate({ onUnlock }: ReviewGateProps) {
-    const [unlocked, setUnlocked] = useState(false);
-    const [showDeployButton, setShowDeployButton] = useState(false);
-    const x = useMotionValue(0);
-    const textOpacity = useTransform(x, [0, 100], [1, 0]);
-    const width = 260; // Track width
+    const [checks, setChecks] = useState({
+        security: true, // Mocked as passed
+        tests: true,
+        manual: false
+    });
 
-    const handleDragEnd = () => {
-        if (x.get() > 180) {
-            setUnlocked(true);
-            setTimeout(() => setShowDeployButton(true), 300); // Trigger morph
-        } else {
-            animate(x, 0, { type: "spring", stiffness: 400, damping: 40 });
-        }
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key.toLowerCase() === 'y') {
+                handleApprove();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
+
+    const handleApprove = () => {
+        setChecks(prev => ({ ...prev, manual: true }));
+        // Small delay to show checkmark
+        setTimeout(() => {
+            onUnlock();
+        }, 200);
     };
 
-    if (showDeployButton) {
-        return (
-            <motion.button
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                onClick={onUnlock}
-                className="w-full bg-linear-to-r from-emerald-500 to-emerald-600 h-14 rounded-xl flex items-center justify-center gap-2 font-bold tracking-widest text-white shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/40 transition-all active:scale-95"
-            >
-                <Unlock size={18} />
-                DEPLOY NOW
-            </motion.button>
-        );
-    }
-
     return (
-        <div className={clsx(
-            "relative h-14 rounded-full border border-white/10 overflow-hidden select-none transition-all duration-500 bg-black/30 w-[260px]",
-            unlocked && "opacity-0 pointer-events-none"
-        )}>
-            {/* Background Track Text */}
-            <motion.div
-                style={{ opacity: textOpacity }}
-                className="absolute inset-0 flex items-center justify-center text-xs font-bold tracking-widest text-white/30"
-            >
-                SLIDE TO APPROVE
-            </motion.div>
+        <div className="w-full bg-black/40 border border-white/10 rounded p-4 flex flex-col gap-3">
+            <div className="text-[10px] font-bold tracking-widest text-white/40 uppercase mb-1">
+                Gate::Evaluation
+            </div>
 
-            {/* Slider Handle */}
-            <motion.div
-                drag={!unlocked ? "x" : false}
-                dragConstraints={{ left: 0, right: width - 56 }}
-                dragElastic={0.1}
-                dragMomentum={false}
-                onDragEnd={handleDragEnd}
-                style={{ x }}
-                className={clsx(
-                    "absolute top-1 bottom-1 left-1 w-12 rounded-full flex items-center justify-center shadow-lg transition-colors cursor-grab active:cursor-grabbing bg-amber-500 hover:bg-amber-400"
-                )}
-            >
-                <ChevronRight size={20} className="text-black" />
-            </motion.div>
+            <div className="space-y-2 font-mono text-xs">
+                <div className="flex items-center justify-between text-emerald-500">
+                    <span>[PASS] Security Scan</span>
+                    <CheckCircle size={12} />
+                </div>
+                <div className="flex items-center justify-between text-emerald-500">
+                    <span>[PASS] Unit Tests</span>
+                    <CheckCircle size={12} />
+                </div>
+                <div className={clsx("flex items-center justify-between transition-colors", checks.manual ? "text-emerald-500" : "text-white/50")}>
+                    <span>[{checks.manual ? 'PASS' : 'WAIT'}] Manual Review</span>
+                    {checks.manual ? <CheckCircle size={12} /> : <div className="w-3 h-3 rounded-full border border-white/20" />}
+                </div>
+            </div>
+
+            <div className="flex gap-2 mt-2">
+                <button
+                    onClick={handleApprove}
+                    className="flex-1 bg-emerald-900/40 border border-emerald-500/50 hover:bg-emerald-500/20 text-emerald-400 py-2 rounded text-xs font-bold tracking-wider transition-all active:scale-95"
+                >
+                    APPROVE (Y)
+                </button>
+                <button
+                    className="flex-1 bg-red-900/40 border border-red-500/50 hover:bg-red-500/20 text-red-400 py-2 rounded text-xs font-bold tracking-wider transition-all active:scale-95"
+                >
+                    REJECT (N)
+                </button>
+            </div>
         </div>
     );
 }
+

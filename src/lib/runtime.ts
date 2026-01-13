@@ -89,7 +89,7 @@ export class HostRuntime {
 
   private async handleOllamaChat(intent: Extract<AgentIntent, { type: 'INTENT_OLLAMA_CHAT' }>) {
     const model = intent.model; // Will use default from ollamaService if undefined
-    
+
     // Emit started event
     this.emit({
       type: 'OLLAMA_CHAT_STARTED',
@@ -110,6 +110,26 @@ export class HostRuntime {
       let lastChunk: OllamaChatResponse | null = null;
       let streamError: Error | null = null;
 
+      // Batching: collect tokens and emit every 150ms
+      let tokenBuffer = '';
+      let lastEmitTime = Date.now();
+      const BATCH_INTERVAL_MS = 150;
+
+      const flushBuffer = () => {
+        if (tokenBuffer) {
+          this.emit({
+            type: 'OLLAMA_BIT',
+            header: intent.header,
+            kind: 'chat',
+            model: lastChunk?.model || model,
+            delta: tokenBuffer,
+            done: false,
+          });
+          tokenBuffer = '';
+          lastEmitTime = Date.now();
+        }
+      };
+
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -120,23 +140,24 @@ export class HostRuntime {
           const delta = value.message?.content ?? '';
           if (delta) {
             aggregatedContent += delta;
+            tokenBuffer += delta;
           }
 
-          this.emit({
-            type: 'OLLAMA_BIT',
-            header: intent.header,
-            kind: 'chat',
-            model: value.model || model,
-            delta,
-            done: value.done,
-          });
+          // Emit batched tokens every BATCH_INTERVAL_MS
+          const now = Date.now();
+          if (now - lastEmitTime >= BATCH_INTERVAL_MS) {
+            flushBuffer();
+          }
 
           if (value.done) {
+            flushBuffer(); // Flush remaining
             break;
           }
         }
+        flushBuffer(); // Final flush
       } catch (error) {
         streamError = error instanceof Error ? error : new Error('Stream read error');
+        flushBuffer(); // Flush on error too
       } finally {
         await reader.cancel().catch(() => undefined);
       }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import clsx from 'clsx';
 import { ActionCardProps, type ActionType } from '@/types';
@@ -48,15 +48,17 @@ export function ActionCard({ type, title, content, timestamp, agentId, severity,
         return chunks;
     }, [contentLines, shouldUseBlockFolding]);
 
-    const [expandedBlocks, setExpandedBlocks] = useState<boolean[]>([]);
+    const expandedBlocks = useMemo(() => {
+        if (!shouldUseBlockFolding) return [];
+        return blocks.map((_, idx) => idx === 0);
+    }, [shouldUseBlockFolding, blocks]);
 
-    useEffect(() => {
-        if (!shouldUseBlockFolding) {
-            setExpandedBlocks([]);
-            return;
-        }
-        setExpandedBlocks(blocks.map((_, idx) => idx === 0));
-    }, [shouldUseBlockFolding, blocks.length, content]);
+    const [manualExpansions, setManualExpansions] = useState<Record<number, boolean>>({});
+
+    const getIsExpanded = (index: number): boolean => {
+        if (index in manualExpansions) return manualExpansions[index];
+        return expandedBlocks[index] ?? (index === 0);
+    };
 
     const animations = shouldReduceMotion ? {
         initial: { opacity: 0 },
@@ -98,7 +100,7 @@ export function ActionCard({ type, title, content, timestamp, agentId, severity,
                         shouldUseBlockFolding ? (
                             <div className="space-y-2">
                                 {blocks.map((block, index) => {
-                                    const isExpanded = expandedBlocks[index] ?? (index === 0);
+                                    const isExpanded = getIsExpanded(index);
                                     const blockContent = isExpanded
                                         ? block.join('\n')
                                         : `${block.slice(0, collapsedLines).join('\n')}${block.length > collapsedLines ? '\n…' : ''}`;
@@ -111,11 +113,10 @@ export function ActionCard({ type, title, content, timestamp, agentId, severity,
                                                 {canToggle && (
                                                     <button
                                                         type="button"
-                                                        onClick={() => setExpandedBlocks((prev) => {
-                                                            const next = [...prev];
-                                                            next[index] = !isExpanded;
-                                                            return next;
-                                                        })}
+                                                        onClick={() => setManualExpansions((prev) => ({
+                                                            ...prev,
+                                                            [index]: !isExpanded
+                                                        }))}
                                                         className={clsx(
                                                             "text-[10px] uppercase tracking-widest",
                                                             isTerminal ? "text-emerald-400/80 hover:text-emerald-300" : "text-white/50 hover:text-white/70"

@@ -1,31 +1,38 @@
 @import "tailwindcss";
 
 :root {
-  /* Core Colors - HSL */
+  /* Industrial Retro Colors - HSL */
+  /* Main Phosphors */
   --sapphire: 210 100% 50%;
+  /* Plan - Blue */
   --emerald: 150 100% 40%;
+  /* Build - Green */
   --amber: 35 100% 50%;
-  --amethyst: 270 90% 60%;
+  /* Review - Amber */
+  --amethyst: 280 80% 60%;
+  /* Deploy - Purple */
 
-  --background: 220 20% 4%;
-  /* Increased contrast foreground */
-  --foreground: 210 20% 98%;
+  --background: 0 0% 5%;
+  /* Almost Black */
+  --foreground: 0 0% 90%;
+  /* Light Grey */
+  --terminal-bg: 0 0% 0%;
+  /* Pure Black */
 
-  /* Tint Layers for Contrast (The "Underlay") */
-  --tint-layer: 0 0% 0%;
-  /* Using pure black here allows the alpha channel in components to control the "optical tint" */
-  /* Dark, solid-ish backing for glass */
+  /* Structural Colors */
+  --panel-bg: 0 0% 8%;
+  --border-color: 0 0% 20%;
+  --border-active: 0 0% 40%;
 
-  /* Glass Vars */
-  --glass-border: 255 255 255 0.12;
-  --glass-surface: 255 255 255 0.03;
-  --glass-glow: 255 255 255 0.05;
+  /* Selection / Highlights */
+  --highlight-blue: 210 100% 50%;
 
-  /* Transition Tokens */
-  --transition-fast: 150ms ease-out;
-  --transition-normal: 200ms ease-out;
-  --transition-slow: 300ms ease-out;
-  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Transition Tokens - Fast & Hard */
+  --transition-fast: 0ms;
+  /* Instant */
+  --transition-normal: 100ms steps(4, end);
+  /* choppy retro feel potentially, or just fast linear */
+  --transition-slow: 200ms ease-out;
 }
 
 body {
@@ -33,16 +40,14 @@ body {
   padding: 0;
   color: hsl(var(--foreground));
   background: hsl(var(--background));
-  background-image:
-    radial-gradient(circle at 0% 0%, hsla(var(--sapphire), 0.15) 0%, transparent 50%),
-    radial-gradient(circle at 100% 100%, hsla(var(--amethyst), 0.15) 0%, transparent 50%);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   overflow: hidden;
   height: 100vh;
   width: 100vw;
+  letter-spacing: -0.02em;
 }
 
-/* Film Grain Texture */
+/* Scanlines & CRT Effect */
 body::before {
   content: "";
   position: fixed;
@@ -52,71 +57,75 @@ body::before {
   height: 100%;
   pointer-events: none;
   z-index: 9999;
-  opacity: 0.03;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  background:
+    /* Scanlines */
+    repeating-linear-gradient(to bottom,
+      rgba(0, 0, 0, 0) 0px,
+      rgba(0, 0, 0, 0) 2px,
+      rgba(0, 0, 0, 0.15) 3px,
+      rgba(0, 0, 0, 0.15) 4px),
+    /* Vignette */
+    radial-gradient(circle, rgba(0, 0, 0, 0) 60%, rgba(0, 0, 0, 0.4) 100%);
+  opacity: 0.4;
+  mix-blend-mode: overlay;
 }
 
-/* Custom Scrollbar */
+
+/* Custom Scrollbar - Blocky */
 ::-webkit-scrollbar {
-  width: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
+  width: 10px;
+  background: hsl(var(--background));
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
+  background: hsl(var(--border-color));
+  border: 1px solid hsl(var(--background));
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: hsl(var(--border-active));
 }
 
-/* Base Interactive Elements - Smooth Transitions */
-button, a, [role="button"] {
-  transition: all var(--transition-fast);
+/* Base Interactive Elements - No Soft Transitions */
+button,
+a,
+[role="button"] {
+  transition: transform 50ms, background-color 0s;
+  cursor: pointer;
 }
 
-input, textarea {
-  transition: all var(--transition-normal);
+button:active {
+  transform: translateY(1px);
 }
 
-/* Utilities */
+input,
+textarea {
+  transition: border-color 0s;
+  font-family: inherit;
+}
+
+/* Utilities - Industrial */
 .glass-panel {
-  background-color: hsla(220, 20%, 4%, 0.95);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-  transition: box-shadow var(--transition-normal),
-              border-color var(--transition-normal),
-              opacity var(--transition-normal);
+  background-color: hsl(var(--panel-bg));
+  border: 1px solid hsl(var(--border-color));
+  box-shadow: none;
+  /* No soft shadows */
 }
 
-.glass-panel:hover {
-  border-color: rgba(255, 255, 255, 0.12);
-}
-
+/* Replaces glass-card with a 'module' look */
 .glass-card {
-  background-color: hsla(var(--tint-layer), 0.5);
-  backdrop-filter: blur(10px) saturate(150%);
-  -webkit-backdrop-filter: blur(10px) saturate(150%);
-  border: 1px solid rgba(var(--glass-border));
-  border-radius: 12px;
-  transition: all var(--transition-normal);
+  background-color: hsl(var(--terminal-bg));
+  border: 1px solid hsl(var(--border-color));
+  border-radius: 2px;
 }
 
 .glass-card:hover {
-  background-color: hsla(var(--tint-layer), 0.6);
-  border-color: rgba(255, 255, 255, 0.2);
-  box-shadow: 0 0 20px rgba(var(--active-aura), 0.1);
-  transform: translateY(-1px);
+  border-color: hsl(var(--border-active));
 }
 
 .glow-text {
-  text-shadow: 0 0 10px currentColor;
+  /* Removed soft glow, replaced with distinct color */
+  font-weight: bold;
 }
 
 .flex-center {
@@ -125,80 +134,41 @@ input, textarea {
   justify-content: center;
 }
 
-.grid-bento {
-  display: grid;
-  grid-template-columns: 260px 1fr 340px;
-  grid-template-rows: 96px 1fr;
-  height: 100vh;
-  gap: 16px;
-  padding: 16px;
-}
-
-/* Accessibility: Reduced Motion */
+/* Accessibiltiy */
 @media (prefers-reduced-motion: reduce) {
 
   *,
   ::before,
   ::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+    animation: none !important;
+    transition: none !important;
   }
 }
 
-/* Accessibility: High Contrast Mode Support */
-@media (forced-colors: active) {
-
-  .glass-panel,
-  .glass-card {
-    border: 2px solid CanvasText;
-  }
-}
-
-/* --- Agent Workspace (Glass Console) --- */
+/* --- Status Indicators --- */
 
 .console-stream {
-  mask-image: linear-gradient(to bottom, transparent, black 2%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent, black 2%);
+  /* Raw terminal look */
 }
 
-/* Typing Indicator Pulse */
 .typing-dot {
-  animation: typingPulse 1.4s infinite forwards;
-  background-color: hsla(var(--active-aura), 0.8);
+  animation: blink 1s step-end infinite;
+  background-color: currentColor;
 }
 
-.typing-dot:nth-child(2) {
-  animation-delay: 0.2s;
-}
-
-.typing-dot:nth-child(3) {
-  animation-delay: 0.4s;
-}
-
-@keyframes typingPulse {
-
-  0%,
-  100% {
-    opacity: 0.2;
-    transform: scale(0.8);
-  }
-
+@keyframes blink {
   50% {
-    opacity: 1;
-    transform: scale(1.1);
+    opacity: 0;
   }
 }
 
 /* Omnibar */
 .omnibar-wrapper {
-  background: hsla(var(--tint-layer), 0.8);
-  backdrop-filter: blur(20px);
-  border-top: 1px solid rgba(var(--glass-border));
-  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.3);
+  background: hsl(var(--panel-bg));
+  border-top: 1px solid hsl(var(--border-color));
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.2);
 }
 
 .omnibar-input {
-  caret-color: hsl(var(--active-aura));
+  caret-color: hsl(var(--emerald));
 }

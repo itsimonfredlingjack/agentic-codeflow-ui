@@ -15,8 +15,8 @@ export async function executeWithAutoFix(
   
   console.log(`[Autonomy] Starting autonomous loop for session: ${runId}`);
 
-  let currentCmd = command;
-  let retries = 0;
+  const currentCmd = command;
+  const retries = 0;
 
   while (retries <= maxRetries) {
     // 1. Generate robust Correlation ID

@@ -3,7 +3,8 @@
 import React from 'react';
 import clsx from 'clsx';
 import { Sparkles, Terminal, CheckCircle, ShieldAlert } from 'lucide-react';
-import { AIAvatar } from './AIAvatar';
+import { Activity } from 'lucide-react';
+
 
 interface WorkspaceHeaderProps {
     currentPhase: 'plan' | 'build' | 'review' | 'deploy';
@@ -44,8 +45,11 @@ export function WorkspaceHeader({ currentPhase, isConnected, isProcessing }: Wor
     return (
         <div className="h-14 border-b border-white/5 flex items-center px-6 justify-between bg-black/20 z-10 shrink-0">
             <div className="flex items-center gap-4">
-                <div className="relative scale-75 origin-left">
-                    <AIAvatar phase={currentPhase} isProcessing={isProcessing} />
+                <div className={clsx(
+                    "w-8 h-8 rounded flex items-center justify-center border transition-colors",
+                    isProcessing ? "bg-[var(--active-aura)] border-white/40" : "bg-white/5 border-white/10"
+                )}>
+                    <Activity size={16} className={clsx(isProcessing && "animate-pulse")} />
                 </div>
                 <div className={clsx("text-sm font-bold tracking-widest flex items-center gap-2", config.accent)}>
                     <RoleIcon size={14} />
@@ -54,7 +58,7 @@ export function WorkspaceHeader({ currentPhase, isConnected, isProcessing }: Wor
             </div>
             <div className="flex items-center gap-2 text-tiny text-white/20">
                 <div className={clsx("w-1.5 h-1.5 rounded-full", isConnected ? "bg-emerald-500 animate-pulse" : "bg-red-500")} />
-                {isConnected ? "SYSTEM ONLINE" : "DISCONNECTED"}
+                {isConnected ? "ONLINE" : "OFFLINE"}
             </div>
         </div>
     );
