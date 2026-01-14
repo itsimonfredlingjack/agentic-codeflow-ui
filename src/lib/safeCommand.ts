@@ -1,6 +1,13 @@
 // src/lib/safeCommand.ts
 // Dev-friendly command parsing + safety policy (no shell injection).
 
+import { parse } from 'shell-quote';
+import {
+  DEFAULT_DENY_PROGRAMS,
+  DEFAULT_REQUIRE_PERMISSION_PROGRAMS,
+  SAFE_ALLOW_PROGRAMS
+} from './securityConfig';
+
 export type ParsedCommand = {
   original: string;
   program: string;
@@ -14,7 +21,8 @@ export type CommandDecision =
 
 const MAX_COMMAND_LENGTH = 4_000;
 
-const SHELL_METACHAR_RE = /[;&|<>]/;
+// Still check for these as an extra safety layer against expansion attacks
+// even though we don't run in a shell.
 const DISALLOWED_SUBSTRINGS = [
   '$(',
   '${',
@@ -23,51 +31,6 @@ const DISALLOWED_SUBSTRINGS = [
   '\r',
   '\0',
 ];
-
-const DEFAULT_DENY_PROGRAMS = new Set([
-  'rm',
-  'rmdir',
-  'dd',
-  'mkfs',
-  'shutdown',
-  'reboot',
-  'poweroff',
-  'killall',
-  'chmod',
-  'chown',
-  'sudo',
-]);
-
-const DEFAULT_REQUIRE_PERMISSION_PROGRAMS = new Set([
-  // Interpreters / shells - too powerful for free-form input
-  'sh',
-  'bash',
-  'zsh',
-  'fish',
-  'node',
-  'python',
-  'python3',
-  'deno',
-  'ruby',
-  'perl',
-  // Networking tools (can exfiltrate / fetch)
-  'curl',
-  'wget',
-  'ssh',
-  'scp',
-]);
-
-const SAFE_ALLOW_PROGRAMS = new Set([
-  'npm',
-  'npx',
-  'git',
-  'ls',
-  'cat',
-  'rg',
-  'sed',
-  'pwd',
-  'echo',
-]);
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
@@ -85,68 +48,35 @@ function looksLikePathTraversal(arg: string) {
   return false;
 }
 
-/**
- * Minimal argv tokenizer with support for single and double quotes.
- * - Rejects unbalanced quotes
- * - Does not implement shell expansions (and we block most shell metacharacters anyway)
- */
-export function tokenizeCommandLine(input: string): { ok: true; argv: string[] } | { ok: false; error: string } {
+export function parseCommandLine(input: string): { ok: true; parsed: ParsedCommand } | { ok: false; error: string } {
   if (!isNonEmptyString(input)) return { ok: false, error: 'Empty command' };
   if (input.length > MAX_COMMAND_LENGTH) return { ok: false, error: 'Command too long' };
 
-  const argv: string[] = [];
-  let current = '';
-  let inSingle = false;
-  let inDouble = false;
-  let escaping = false;
-
-  for (let i = 0; i < input.length; i++) {
-    const ch = input[i];
-
-    if (escaping) {
-      current += ch;
-      escaping = false;
-      continue;
-    }
-
-    if (ch === '\\' && !inSingle) {
-      escaping = true;
-      continue;
-    }
-
-    if (ch === "'" && !inDouble) {
-      inSingle = !inSingle;
-      continue;
-    }
-
-    if (ch === '"' && !inSingle) {
-      inDouble = !inDouble;
-      continue;
-    }
-
-    if (!inSingle && !inDouble && /\s/.test(ch)) {
-      if (current) {
-        argv.push(current);
-        current = '';
-      }
-      continue;
-    }
-
-    current += ch;
+  let entries;
+  try {
+    entries = parse(input);
+  } catch (e) {
+    return { ok: false, error: 'Failed to parse command' };
   }
 
-  if (escaping) return { ok: false, error: 'Invalid trailing escape' };
-  if (inSingle || inDouble) return { ok: false, error: 'Unbalanced quotes' };
-  if (current) argv.push(current);
+  // Check for shell operators (detected by shell-quote as objects like { op: '|' })
+  const hasOperators = entries.some(e => typeof e !== 'string');
+  if (hasOperators) {
+    return { ok: false, error: 'Shell operators are not allowed' };
+  }
 
-  return { ok: true, argv };
-}
+  const argv = entries as string[];
+  if (argv.length === 0) return { ok: false, error: 'Empty command' };
 
-export function parseCommandLine(input: string): { ok: true; parsed: ParsedCommand } | { ok: false; error: string } {
-  const tokenized = tokenizeCommandLine(input);
-  if (!tokenized.ok) return tokenized;
-  const [program, ...args] = tokenized.argv;
-  if (!program) return { ok: false, error: 'Missing program' };
+  // Environment variable assignments (e.g. VAR=val cmd) are parsed as separate args by shell-quote
+  // But we treat the first non-assignment as the program.
+  // Actually, shell-quote parses `VAR=val cmd` as `['VAR=val', 'cmd']`.
+  // If we only support simple commands, we assume the first arg is the program.
+  // If the user tries `VAR=val cmd`, `program` will be `VAR=val`.
+  // This will likely fail the allow-list check, which is fine (safe).
+
+  const [program, ...args] = argv;
+
   return { ok: true, parsed: { original: input, program, args } };
 }
 
@@ -164,9 +94,8 @@ export function decideCommand(input: string): CommandDecision {
     return { kind: 'deny', reason: 'Shell expansion/substitution is not allowed' };
   }
 
-  if (SHELL_METACHAR_RE.test(trimmed)) {
-    return { kind: 'deny', reason: 'Shell operators are not allowed (no pipes/redirects/&&/;)' };
-  }
+  // Note: We removed the regex check for metachars because shell-quote handles them
+  // (returning operators) and handles quoted strings correctly (e.g. echo "foo; bar").
 
   const parsed = parseCommandLine(trimmed);
   if (!parsed.ok) return { kind: 'deny', reason: parsed.error };

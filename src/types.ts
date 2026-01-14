@@ -84,14 +84,16 @@ export type RuntimeEvent =
   | { type: 'PROCESS_EXITED'; header: MessageHeader; code: number }
   | { type: 'SECURITY_VIOLATION'; header: MessageHeader; policy: string; attemptedPath: string }
   | { type: 'PERMISSION_REQUESTED'; header: MessageHeader; requestId: string; command: string; riskLevel: 'high' }
-  | { type: 'STATE_SNAPSHOT_SAVED'; header: MessageHeader; stateValue: string }
+  | { type: 'STATE_SNAPSHOT_SAVED'; header: MessageHeader; stateValue: unknown }
   | { type: 'WORKFLOW_ERROR'; header: MessageHeader; error: string; severity: 'warn' | 'fatal' }
   | { type: 'OLLAMA_RESPONSE'; header: MessageHeader; model: string; response: string; metadata?: Record<string, unknown> }
   | { type: 'OLLAMA_ERROR'; header: MessageHeader; error: string; model?: string }
   | { type: 'OLLAMA_CHAT_STARTED'; header: MessageHeader; model?: string }
   | { type: 'OLLAMA_BIT'; header: MessageHeader; kind: OllamaStreamKind; model?: string; delta: string; done: boolean }
   | { type: 'OLLAMA_CHAT_COMPLETED'; header: MessageHeader; response: OllamaChatResponse }
-  | { type: 'OLLAMA_CHAT_FAILED'; header: MessageHeader; model?: string; error: string };
+  | { type: 'OLLAMA_CHAT_FAILED'; header: MessageHeader; model?: string; error: string }
+  | { type: 'ARTIFACT_GENERATED'; header: MessageHeader; name: string; content: unknown }
+  | { type: 'AGENT_THOUGHT'; header: MessageHeader; title: string; content: unknown };
 
 // --- Semantic Events (For Card View Logic) ---
 export type SemanticEvent = 

@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ollamaClient, OllamaError, OllamaTimeoutError, OllamaConnectionError, OllamaHttpError } from '@/lib/ollama';
-import type { OllamaChatMessage, OllamaChatRole } from '@/types';
+import { OllamaApiBodySchema } from '@/lib/schemas';
 
 export const dynamic = 'force-dynamic';
-
-// Valid roles for chat messages
-const VALID_ROLES: OllamaChatRole[] = ['system', 'user', 'assistant'];
 
 /**
  * Type guard for OllamaHttpError with statusCode
@@ -15,71 +12,27 @@ function isHttpErrorWithStatus(error: unknown): error is OllamaHttpError & { sta
 }
 
 /**
- * Validate chat messages structure
- */
-function validateMessages(messages: unknown): messages is OllamaChatMessage[] {
-  if (!Array.isArray(messages) || messages.length === 0) {
-    return false;
-  }
-  
-  return messages.every((msg) => {
-    if (typeof msg !== 'object' || msg === null) return false;
-    const m = msg as Record<string, unknown>;
-    return (
-      typeof m.role === 'string' &&
-      VALID_ROLES.includes(m.role as OllamaChatRole) &&
-      typeof m.content === 'string'
-    );
-  });
-}
-
-/**
- * Validate model parameter
- */
-function validateModel(model: unknown): model is string | undefined {
-  return model === undefined || typeof model === 'string';
-}
-
-/**
- * Validate options parameter
- */
-function validateOptions(options: unknown): options is Record<string, unknown> | undefined {
-  return options === undefined || (typeof options === 'object' && options !== null && !Array.isArray(options));
-}
-
-/**
  * POST /api/ollama
  * Generate text or chat with Ollama models
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { action, model, prompt, messages, options } = body;
+    const json = await request.json();
+    const result = OllamaApiBodySchema.safeParse(json);
 
-    // Validate model
-    if (!validateModel(model)) {
+    if (!result.success) {
+      const errorMessages = result.error.issues.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
       return NextResponse.json(
-        { error: 'Invalid model parameter. Must be a string or undefined.' },
+        { error: `Validation error: ${errorMessages}` },
         { status: 400 }
       );
     }
 
-    // Validate options
-    if (!validateOptions(options)) {
-      return NextResponse.json(
-        { error: 'Invalid options parameter. Must be an object or undefined.' },
-        { status: 400 }
-      );
-    }
+    const body = result.data;
+    const { action, model, options } = body;
 
     if (action === 'generate') {
-      if (!prompt || typeof prompt !== 'string') {
-        return NextResponse.json(
-          { error: 'Missing or invalid prompt for generate action. Must be a non-empty string.' },
-          { status: 400 }
-        );
-      }
-
+      const { prompt } = body;
       const response = await ollamaClient.generate({
         model,
         prompt,
@@ -102,13 +55,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'chat') {
-      if (!validateMessages(messages)) {
-        return NextResponse.json(
-          { error: 'Missing or invalid messages for chat action. Must be a non-empty array of {role, content} objects with valid roles (system, user, assistant).' },
-          { status: 400 }
-        );
-      }
-
+      const { messages } = body;
       const response = await ollamaClient.chat({
         model,
         messages,
@@ -129,10 +76,12 @@ export async function POST(request: NextRequest) {
       });
     }
 
-     return NextResponse.json(
+    // Should be unreachable due to Zod discriminated union
+    return NextResponse.json(
        { error: 'Invalid action. Use "generate" or "chat"' },
        { status: 400 }
-     );
+    );
+
    } catch (error) {
      console.error('[Ollama API] Error:', error);
 
