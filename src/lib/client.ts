@@ -7,6 +7,9 @@ type ConnectionStatus = 'connecting' | 'open' | 'error' | 'closed';
 type EventHandler = (event: RuntimeEvent) => void;
 type StatusHandler = (status: ConnectionStatus) => void;
 
+type SendableIntent<T extends AgentIntent = AgentIntent> =
+  T extends unknown ? Omit<T, 'header'> & { header?: Partial<MessageHeader> } : never;
+
 class AgencyClient {
   private eventSource: EventSource | null = null;
   private listeners: EventHandler[] = [];
@@ -111,7 +114,7 @@ class AgencyClient {
     this.listeners.forEach(handler => handler(event));
   }
 
-  public async send(intent: Omit<AgentIntent, 'header'> & { header?: Partial<MessageHeader> }) {
+  public async send(intent: SendableIntent) {
     if (!this.runId) throw new Error('Client not connected to a run.');
 
     const fullIntent: AgentIntent = {

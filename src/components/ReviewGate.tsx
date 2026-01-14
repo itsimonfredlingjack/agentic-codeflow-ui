@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { CheckCircle } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -17,6 +17,14 @@ export function ReviewGate({ onUnlock }: ReviewGateProps) {
         manual: false
     });
 
+    const handleApprove = useCallback(() => {
+        setChecks(prev => ({ ...prev, manual: true }));
+        // Small delay to show checkmark
+        setTimeout(() => {
+            onUnlock();
+        }, 200);
+    }, [onUnlock]);
+
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key.toLowerCase() === 'y') {
@@ -25,15 +33,7 @@ export function ReviewGate({ onUnlock }: ReviewGateProps) {
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
-
-    const handleApprove = () => {
-        setChecks(prev => ({ ...prev, manual: true }));
-        // Small delay to show checkmark
-        setTimeout(() => {
-            onUnlock();
-        }, 200);
-    };
+    }, [handleApprove]);
 
     return (
         <div className="w-full bg-black/40 border border-white/10 rounded p-4 flex flex-col gap-3">
@@ -72,4 +72,3 @@ export function ReviewGate({ onUnlock }: ReviewGateProps) {
         </div>
     );
 }
-

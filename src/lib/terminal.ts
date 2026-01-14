@@ -1,57 +1,68 @@
 // src/lib/terminal.ts
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import treeKill from 'tree-kill';
 import { RuntimeEvent, MessageHeader } from '@/types';
 
 export class TerminalService {
     private activeProcesses = new Map<string, ChildProcess>(); // correlationId -> Process
     private projectRoot = process.cwd(); // Default to current CWD
+    private readonly defaultTimeoutMs = 10 * 60 * 1000; // 10 minutes
+    private readonly maxOutputBytes = 512 * 1024; // 512KB per stream
 
-    public execute(
+    public executeParsed(
         header: MessageHeader,
-        command: string, 
+        program: string,
+        args: string[],
         onEvent: (e: RuntimeEvent) => void
     ) {
-        // 1. Security Check (Sandbox Light)
-        // I en riktig app, validera att command inte försöker göra cd ../
-        if (command.includes('..') || command.includes('/etc')) {
-            onEvent({
-                type: 'SECURITY_VIOLATION',
-                header,
-                policy: 'PATH_TRAVERSAL_DETECTED',
-                attemptedPath: command
-            });
-            return;
-        }
-
-        // 2. Spawn Process
-        const [cmd, ...args] = command.split(' ');
-        const child = spawn(cmd, args, { 
-            cwd: this.projectRoot, 
-            shell: true,
-            env: { ...process.env, FORCE_COLOR: 'true' } 
+        // Spawn without a shell to avoid shell injection via operators (&&, ;, |, redirects).
+        const child = spawn(program, args, {
+            cwd: this.projectRoot,
+            shell: false,
+            env: { ...process.env, FORCE_COLOR: 'true' }
         });
 
         this.activeProcesses.set(header.correlationId, child);
 
+        const renderedCommand = [program, ...args].join(' ');
         onEvent({ 
             type: 'PROCESS_STARTED', 
             header, 
             pid: child.pid || 0, 
-            command 
+            command: renderedCommand 
         });
 
         // 3. Stream Output
+        let stdoutBytes = 0;
+        let stderrBytes = 0;
+
         child.stdout?.on('data', (data) => {
-            onEvent({ type: 'STDOUT_CHUNK', header, content: data.toString() });
+            if (stdoutBytes >= this.maxOutputBytes) return;
+            const chunk = data.toString();
+            stdoutBytes += Buffer.byteLength(chunk, 'utf8');
+            const content = stdoutBytes > this.maxOutputBytes
+                ? `${chunk}\n... (stdout truncated)`
+                : chunk;
+            onEvent({ type: 'STDOUT_CHUNK', header, content });
         });
 
         child.stderr?.on('data', (data) => {
-            onEvent({ type: 'STDERR_CHUNK', header, content: data.toString() });
+            if (stderrBytes >= this.maxOutputBytes) return;
+            const chunk = data.toString();
+            stderrBytes += Buffer.byteLength(chunk, 'utf8');
+            const content = stderrBytes > this.maxOutputBytes
+                ? `${chunk}\n... (stderr truncated)`
+                : chunk;
+            onEvent({ type: 'STDERR_CHUNK', header, content });
         });
+
+        const timeoutId = setTimeout(() => {
+            this.kill(header.correlationId);
+        }, this.defaultTimeoutMs);
 
         // 4. Handle Exit
         child.on('close', (code) => {
+            clearTimeout(timeoutId);
             this.activeProcesses.delete(header.correlationId);
             onEvent({ type: 'PROCESS_EXITED', header, code: code || 0 });
         });

@@ -54,6 +54,8 @@ const PHASE_MAP: Record<string, 'plan' | 'build' | 'review' | 'deploy'> = {
     'deploy': 'deploy'
 };
 
+type MissionStage = 'plan' | 'build' | 'review' | 'deploy';
+
 export function MissionControl() {
     const [initialSnapshot, setInitialSnapshot] = useState<MissionPersistedSnapshot | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -110,7 +112,8 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
 
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState(false);
-    const sessionStartRef = useRef(Date.now());
+    const [isProcessing, setIsProcessing] = useState(false);
+    const sessionStartRef = useRef<number>(0);
     const currentPhaseRef = useRef<'plan' | 'build' | 'review' | 'deploy'>('plan');
     const lastConnectionStatusRef = useRef<'connecting' | 'open' | 'error' | 'closed' | null>(null);
     const { lastEvent, connectionStatus } = useAgencyClient(snapshot.context.runId);
@@ -129,7 +132,7 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
 
     useEffect(() => {
         sessionStartRef.current = Date.now();
-        setActions([]);
+        queueMicrotask(() => setActions([]));
         lastConnectionStatusRef.current = null;
     }, [snapshot.context.runId]);
 
@@ -160,9 +163,18 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
     const currentPhase = (Object.keys(PHASE_MAP).find(key => matchesPhase(key)) || 'plan') as 'plan' | 'build' | 'review' | 'deploy';
     const isLockdown = snapshot.matches('security_lockdown');
 
+    const roleIdToStage = (roleId: RoleId): MissionStage => {
+        switch (roleId) {
+            case 'PLAN': return 'plan';
+            case 'BUILD': return 'build';
+            case 'REVIEW': return 'review';
+            case 'DEPLOY': return 'deploy';
+        }
+    };
+
     // Phase Shortcuts
     usePhaseShortcuts(currentPhase, (newPhase) => {
-        send({ type: 'SET_STAGE', stage: newPhase } as any);
+        send({ type: 'SET_STAGE', stage: newPhase });
     });
 
     useEffect(() => {
@@ -261,7 +273,14 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
             case 'SECURITY_VIOLATION':
                 return { ...base, type: 'error' as const, title: 'Security Violation', content: `Policy: ${event.policy}, Path: ${event.attemptedPath}`, severity: 'error' as const };
             case 'PERMISSION_REQUESTED':
-                return { ...base, type: 'log' as const, title: 'Permission Request', content: `Command: ${event.command}, Risk: ${event.riskLevel}` };
+                return {
+                    ...base,
+                    type: 'security_gate' as const,
+                    title: 'Permission Required',
+                    content: `Command: ${event.command}`,
+                    severity: 'warn' as const,
+                    payload: { requestId: event.requestId, command: event.command, riskLevel: event.riskLevel },
+                };
             case 'SYS_READY':
                 return { ...base, type: 'log' as const, title: 'System Ready', content: 'System initialized and ready.' };
             default:
@@ -313,8 +332,23 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
         if (typeof timestamp !== 'number' || timestamp < sessionStartRef.current) return;
 
         const idSuffix = `live-${lastEvent.header.correlationId}-${timestamp}-${Math.random().toString(16).slice(2)}`;
-        setActions((prev) => [...prev, toAction(lastEvent, idSuffix)]);
+        queueMicrotask(() => setActions((prev) => [...prev, toAction(lastEvent, idSuffix)]));
     }, [lastEvent, snapshot.context.runId]);
+
+    // Track processing state for AI responses
+    useEffect(() => {
+        if (!lastEvent) return;
+        if (lastEvent.type === 'OLLAMA_CHAT_STARTED' || lastEvent.type === 'PROCESS_STARTED') {
+            queueMicrotask(() => setIsProcessing(true));
+        } else if (
+            lastEvent.type === 'OLLAMA_CHAT_COMPLETED' ||
+            lastEvent.type === 'OLLAMA_CHAT_FAILED' ||
+            lastEvent.type === 'OLLAMA_ERROR' ||
+            lastEvent.type === 'PROCESS_EXITED'
+        ) {
+            queueMicrotask(() => setIsProcessing(false));
+        }
+    }, [lastEvent]);
 
     // UI Input Handler - Dispatch Intents to Host
     const handleSendMessage = async (msg: string) => {
@@ -377,7 +411,7 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
             <div className="absolute left-0 right-0 top-2 z-40 flex justify-center">
                 <RoleNavigator
                     currentPhase={currentPhase.toUpperCase() as RoleId}
-                    onSetPhase={(roleId) => send({ type: 'SET_STAGE', stage: roleId.toLowerCase() } as any)}
+                    onSetPhase={(roleId) => send({ type: 'SET_STAGE', stage: roleIdToStage(roleId) })}
                     modelAssignments={modelAssignments}
                     onSetModel={(roleId, modelId) => {
                         setModelAssignments(prev => ({ ...prev, [roleId]: modelId }));
@@ -417,7 +451,7 @@ function MissionControlInner({ initialSnapshot }: { initialSnapshot?: MissionPer
             <StatusBar
                 currentPhase={currentPhase}
                 eventCount={actions.length}
-                isProcessing={false}
+                isProcessing={isProcessing}
                 connectionStatus={connectionStatus}
             />
         </div>

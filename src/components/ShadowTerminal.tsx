@@ -2,10 +2,25 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { ActionCardProps } from '@/types';
 import clsx from 'clsx';
+import { ThinkingIndicator } from './ThinkingIndicator';
+import { MarkdownMessage } from './MarkdownMessage';
 
+// Extended type to include streaming state
+type StreamItem = ActionCardProps & {
+    isTyping?: boolean;
+};
 
-
-export function ShadowTerminal({ actions, splitView = false }: { actions: ActionCardProps[], splitView?: boolean }) {
+export function ShadowTerminal({
+    actions,
+    splitView = false,
+    onApprovePermission,
+    onDenyPermission,
+}: {
+    actions: StreamItem[],
+    splitView?: boolean,
+    onApprovePermission?: (requestId: string) => void,
+    onDenyPermission?: (requestId: string) => void,
+}) {
     const bottomRef = useRef<HTMLDivElement>(null);
     const bottomRefSplit = useRef<HTMLDivElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -16,9 +31,12 @@ export function ShadowTerminal({ actions, splitView = false }: { actions: Action
     const [searchQuery, setSearchQuery] = useState('');
 
     // --- Helpers ---
-    const filterActions = (list: ActionCardProps[], type: 'chat' | 'terminal') => {
+    const filterActions = (list: StreamItem[], type: 'chat' | 'terminal') => {
         return list.filter(a => {
-            const isTerminal = a.type === 'command' || a.title === 'STDOUT' || a.title === 'STDERR' || a.type === 'code';
+            // Qwen responses go to CHAT even if type is 'code'
+            const isQwenResponse = a.agentId === 'QWEN';
+            // Terminal: actual shell output (STDOUT, STDERR, commands) but NOT Qwen
+            const isTerminal = !isQwenResponse && (a.type === 'command' || a.title === 'STDOUT' || a.title === 'STDERR');
             const match = type === 'terminal' ? isTerminal : !isTerminal;
             if (!match) return false;
             if (searchQuery) {
@@ -29,19 +47,46 @@ export function ShadowTerminal({ actions, splitView = false }: { actions: Action
         });
     };
 
-    // Auto-scroll effect
-    useEffect(() => {
-        if (!autoScroll) return;
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-        bottomRefSplit.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }, [actions.length, autoScroll, splitView]);
-
     const chatActions = filterActions(actions, 'chat');
     const terminalActions = filterActions(actions, 'terminal');
 
+    // Track previous lengths to detect new content
+    const prevChatLength = useRef(chatActions.length);
+    const prevTerminalLength = useRef(terminalActions.length);
+
+    // Auto-scroll effect - always scroll when NEW content arrives
+    useEffect(() => {
+        const chatGrew = chatActions.length > prevChatLength.current;
+        const terminalGrew = terminalActions.length > prevTerminalLength.current;
+
+        prevChatLength.current = chatActions.length;
+        prevTerminalLength.current = terminalActions.length;
+
+        // If new content arrived, re-enable autoscroll and scroll
+        if (chatGrew || terminalGrew) {
+            queueMicrotask(() => setAutoScroll(true));
+        }
+
+        if (!autoScroll) return;
+
+        // Small delay to ensure DOM is updated
+        requestAnimationFrame(() => {
+            if (splitView) {
+                if (chatGrew) {
+                    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                }
+                if (terminalGrew) {
+                    bottomRefSplit.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                }
+            } else {
+                bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+            }
+        });
+    }, [chatActions.length, terminalActions.length, autoScroll, splitView]);
+
     return (
         <div
-            className="w-full h-full rounded flex flex-col overflow-hidden relative border border-white/10 bg-[#050505]"
+            className="w-full h-full rounded flex flex-col overflow-hidden relative border border-white/10 bg-[#0a0a0a] crt-scanlines crt-flicker"
             role="region"
             aria-label="Shadow Terminal Output"
         >
@@ -81,22 +126,26 @@ export function ShadowTerminal({ actions, splitView = false }: { actions: Action
                 <div className="flex-1 flex min-h-0 divide-x divide-white/10">
                     {/* Left: Chat */}
                     <div className="flex-1 flex flex-col min-w-0">
-                        <div className="bg-white/5 px-2 py-1 text-[9px] uppercase tracking-widest text-white/30 border-b border-white/5">Comm_Link</div>
+                        <div className="bg-emerald-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-emerald-400/80 border-b border-emerald-500/20 font-bold">CHAT</div>
                         <StreamPane
                             items={chatActions}
                             scrollRef={scrollRef}
                             bottomRef={bottomRef}
                             onUserScroll={() => setAutoScroll(false)}
+                            onApprovePermission={onApprovePermission}
+                            onDenyPermission={onDenyPermission}
                         />
                     </div>
                     {/* Right: Terminal */}
                     <div className="flex-1 flex flex-col min-w-0 bg-black/40">
-                        <div className="bg-white/5 px-2 py-1 text-[9px] uppercase tracking-widest text-white/30 border-b border-white/5">Hard_Line</div>
+                        <div className="bg-amber-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-amber-400/80 border-b border-amber-500/20 font-bold">TERMINAL</div>
                         <StreamPane
                             items={terminalActions}
                             scrollRef={scrollRefSplit}
                             bottomRef={bottomRefSplit}
                             onUserScroll={() => setAutoScroll(false)}
+                            onApprovePermission={onApprovePermission}
+                            onDenyPermission={onDenyPermission}
                         />
                     </div>
                 </div>
@@ -106,6 +155,8 @@ export function ShadowTerminal({ actions, splitView = false }: { actions: Action
                     scrollRef={scrollRef}
                     bottomRef={bottomRef}
                     onUserScroll={() => setAutoScroll(false)}
+                    onApprovePermission={onApprovePermission}
+                    onDenyPermission={onDenyPermission}
                 />
             )}
         </div>
@@ -116,12 +167,16 @@ function StreamPane({
     items,
     scrollRef,
     bottomRef,
-    onUserScroll
+    onUserScroll,
+    onApprovePermission,
+    onDenyPermission,
 }: {
-    items: ActionCardProps[],
+    items: StreamItem[],
     scrollRef: React.RefObject<HTMLDivElement | null>,
     bottomRef: React.RefObject<HTMLDivElement | null>,
-    onUserScroll: () => void
+    onUserScroll: () => void,
+    onApprovePermission?: (requestId: string) => void,
+    onDenyPermission?: (requestId: string) => void,
 }) {
     const SCROLL_BOTTOM_THRESHOLD_PX = 24;
     return (
@@ -136,22 +191,38 @@ function StreamPane({
                 }
             }}
         >
-            <div className="font-mono text-xs space-y-1 text-white/90 selection:bg-white/20">
+            <div className="font-mono text-sm space-y-1.5 text-white selection:bg-white/20">
                 {items.map((action) => (
                     <div key={action.id} className="flex gap-3 hover:bg-white/5 p-1 rounded group">
-                        <span className="opacity-40 select-none w-20 text-[10px] pt-0.5">{action.timestamp}</span>
+                        <span className="opacity-60 select-none w-20 text-[11px] pt-0.5 text-cyan-400/60">{action.timestamp}</span>
                         <span className={clsx(
-                            "font-bold uppercase w-16 select-none text-[10px] pt-0.5",
-                            action.type === 'error' ? 'text-red-500' :
-                                action.type === 'command' ? 'text-emerald-500' :
-                                    action.type === 'code' ? 'text-amber-500' : 'text-blue-500'
-                        )}>{action.type}</span>
+                            "w-2 h-2 rounded-full mt-1.5 shrink-0",
+                            action.type === 'error' ? 'bg-red-500' :
+                                action.type === 'command' ? 'bg-emerald-500' :
+                                    action.type === 'code' ? 'bg-amber-500' :
+                                        action.type === 'security_gate' ? 'bg-amber-400' : 'bg-blue-500'
+                        )} title={action.type} />
                         <span className="flex-1 break-all whitespace-pre-wrap group-hover:text-white transition-colors">
                             {action.agentId !== 'SYSTEM' && <span className="text-white/40 mr-2">[{action.agentId}]</span>}
                             <span className="font-bold">{action.title}</span>
-                            {action.content && (
+                            {action.isTyping ? (
+                                <div className="mt-2">
+                                    <ThinkingIndicator phase={action.phase as 'plan' | 'build' | 'review' | 'deploy'} />
+                                </div>
+                            ) : action.content && (
                                 <div className="mt-1 opacity-80 border-l border-white/10 pl-2 ml-1">
-                                    {action.content}
+                                    {action.type === 'security_gate' && action.payload && typeof action.payload === 'object' ? (
+                                        <PermissionGateRow
+                                            payload={action.payload as Record<string, unknown>}
+                                            onApprove={onApprovePermission}
+                                            onDeny={onDenyPermission}
+                                        />
+                                    ) : null}
+                                    {(action.agentId === 'QWEN' || action.type === 'code') ? (
+                                        <MarkdownMessage content={action.content} />
+                                    ) : (
+                                        <span className="whitespace-pre-wrap">{action.content}</span>
+                                    )}
                                 </div>
                             )}
                         </span>
@@ -163,3 +234,35 @@ function StreamPane({
     );
 }
 
+function PermissionGateRow({
+    payload,
+    onApprove,
+    onDeny,
+}: {
+    payload: Record<string, unknown>;
+    onApprove?: (requestId: string) => void;
+    onDeny?: (requestId: string) => void;
+}) {
+    const requestId = typeof payload.requestId === 'string' ? payload.requestId : null;
+    if (!requestId) return null;
+
+    return (
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+            <button
+                type="button"
+                onClick={() => onApprove?.(requestId)}
+                className="text-[10px] font-mono px-2 py-1 rounded border bg-emerald-500/10 border-emerald-500/20 text-emerald-200 hover:bg-emerald-500/20"
+            >
+                Approve
+            </button>
+            <button
+                type="button"
+                onClick={() => onDeny?.(requestId)}
+                className="text-[10px] font-mono px-2 py-1 rounded border bg-red-500/10 border-red-500/20 text-red-200 hover:bg-red-500/20"
+            >
+                Deny
+            </button>
+            <span className="text-[10px] font-mono text-white/40">requestId: {requestId}</span>
+        </div>
+    );
+}

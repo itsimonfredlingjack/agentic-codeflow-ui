@@ -3,13 +3,82 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Check, Copy, Play, Zap } from 'lucide-react';
+import { Check, Copy, Play, Zap, FileCode2, FileJson, Terminal, Palette, Code2, Braces, FileCode } from 'lucide-react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import clsx from 'clsx';
 import { motion } from 'framer-motion';
 import { agencyClient } from '@/lib/client';
 import type { AgentIntent } from '@/types';
+import { ThinkingBlock } from './ThinkingBlock';
+
+// Parse thinking blocks from content
+function parseThinkingBlocks(content: string): { thinking: string | null; rest: string } {
+    const thinkingRegex = /<thinking>([\s\S]*?)<\/thinking>/gi;
+    const matches = content.match(thinkingRegex);
+
+    if (!matches || matches.length === 0) {
+        return { thinking: null, rest: content };
+    }
+
+    // Extract thinking content (without tags)
+    const thinkingContent = matches
+        .map(match => match.replace(/<\/?thinking>/gi, '').trim())
+        .join('\n');
+
+    // Remove thinking blocks from content
+    const rest = content.replace(thinkingRegex, '').trim();
+
+    return { thinking: thinkingContent, rest };
+}
+
+// Language to icon mapping
+function getLanguageIcon(language: string | undefined) {
+    const lang = (language || '').toLowerCase();
+    const iconProps = { size: 14, className: 'code-lang-icon' };
+
+    switch (lang) {
+        case 'typescript':
+        case 'tsx':
+            return <FileCode2 {...iconProps} />;
+        case 'javascript':
+        case 'jsx':
+            return <FileJson {...iconProps} />;
+        case 'python':
+        case 'py':
+            return <FileCode {...iconProps} />;
+        case 'bash':
+        case 'sh':
+        case 'shell':
+        case 'zsh':
+            return <Terminal {...iconProps} />;
+        case 'css':
+        case 'scss':
+        case 'sass':
+            return <Palette {...iconProps} />;
+        case 'html':
+            return <Code2 {...iconProps} />;
+        case 'json':
+            return <Braces {...iconProps} />;
+        default:
+            return <FileCode {...iconProps} />;
+    }
+}
+
+// Get CSS class for language-specific glow
+function getGlowClass(language: string | undefined): string {
+    const lang = (language || '').toLowerCase();
+    if (['typescript', 'ts'].includes(lang)) return 'code-glow-typescript';
+    if (['tsx'].includes(lang)) return 'code-glow-tsx';
+    if (['javascript', 'js'].includes(lang)) return 'code-glow-javascript';
+    if (['jsx'].includes(lang)) return 'code-glow-jsx';
+    if (['python', 'py'].includes(lang)) return 'code-glow-python';
+    if (['bash', 'sh', 'shell', 'zsh'].includes(lang)) return 'code-glow-bash';
+    if (['css', 'scss', 'sass'].includes(lang)) return 'code-glow-css';
+    if (['html'].includes(lang)) return 'code-glow-html';
+    if (['json'].includes(lang)) return 'code-glow-json';
+    return '';
+}
 
 type MarkdownMessageProps = {
     content: string;
@@ -151,14 +220,8 @@ function ApplyButton({
     const [diffText, setDiffText] = useState<string | null>(null);
     const [baseSha, setBaseSha] = useState<string | null>(null);
     const [pathPromptOpen, setPathPromptOpen] = useState(false);
-    const [pathInput, setPathInput] = useState('');
+    const [pathInput, setPathInput] = useState(filePath ?? '');
     const [pathError, setPathError] = useState<string | null>(null);
-
-    useEffect(() => {
-        if (!pathInput && filePath) {
-            setPathInput(filePath);
-        }
-    }, [filePath, pathInput]);
 
     const closeConfirm = () => {
         setDiffText(null);
@@ -225,6 +288,9 @@ function ApplyButton({
                     if (state !== 'idle') return;
                     const targetPath = filePath || pathInput.trim();
                     if (!targetPath) {
+                        if (filePath && !pathInput) {
+                            setPathInput(filePath);
+                        }
                         setPathPromptOpen(true);
                         setPathError(null);
                         return;
@@ -492,7 +558,7 @@ function CodeFence({
     }, [resolvedPath, value]);
 
     const handleRunCommand = useCallback(async (command: string) => {
-        await agencyClient.send({ type: 'INTENT_EXEC_CMD', command } as Omit<AgentIntent, 'header'>);
+        await agencyClient.send({ type: 'INTENT_EXEC_CMD', command });
     }, []);
 
     const handleToggleDiff = useCallback(async () => {
@@ -526,9 +592,16 @@ function CodeFence({
         }
     }, [resolvedPath, showDiff, diffText, diffLoading, value]);
 
+    const glowClass = getGlowClass(language);
+    const lines = value.split('\n');
+    const showLineNumbers = lines.length > 3; // Show line numbers for 4+ lines
+
     return (
         <motion.div
-            className="my-2 rounded-lg border border-white/10 bg-black/50 overflow-hidden relative"
+            className={clsx(
+                "my-2 rounded-lg bg-black/50 overflow-hidden relative code-glow",
+                glowClass
+            )}
             animate={appliedPulse > 0 ? { scale: [1, 0.985, 1] } : undefined}
             transition={{ duration: 0.28 }}
         >
@@ -545,10 +618,11 @@ function CodeFence({
                 />
             )}
 
-            <div className="flex items-center justify-between px-3 py-2 border-b border-white/10 bg-black/30">
-                <div className="text-[10px] font-mono uppercase tracking-widest text-white/50 truncate">
-                    {language || 'code'}
-                    {resolvedPath ? <span className="text-white/25"> • {resolvedPath}</span> : null}
+            <div className="code-header flex items-center justify-between">
+                <div className="flex items-center gap-2 truncate">
+                    {getLanguageIcon(language)}
+                    <span className="code-header-lang">{language || 'code'}</span>
+                    {resolvedPath ? <span className="text-white/25 ml-1">• {resolvedPath}</span> : null}
                 </div>
                 <div className="flex items-center gap-2">
                     {resolvedPath && !isCommandBlock ? (
@@ -603,35 +677,50 @@ function CodeFence({
                     )}
                 </div>
             ) : (
-                <SyntaxHighlighter
-                    language={language || undefined}
-                    style={vscDarkPlus}
-                    customStyle={{
-                        margin: 0,
-                        background: 'transparent',
-                        padding: '12px',
-                        fontSize: 'var(--terminal-code-font-size)',
-                        lineHeight: 1.65,
-                    }}
-                    codeTagProps={{
-                        style: {
-                            fontFamily:
-                                'var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                        },
-                    }}
-                >
-                    {value}
-                </SyntaxHighlighter>
+                <div className="relative">
+                    {showLineNumbers && (
+                        <div className="code-line-numbers">
+                            {lines.map((_, i) => (
+                                <span key={i}>{i + 1}</span>
+                            ))}
+                        </div>
+                    )}
+                    <SyntaxHighlighter
+                        language={language || undefined}
+                        style={vscDarkPlus}
+                        customStyle={{
+                            margin: 0,
+                            background: 'transparent',
+                            padding: '12px',
+                            paddingLeft: showLineNumbers ? '56px' : '12px',
+                            fontSize: 'var(--terminal-code-font-size)',
+                            lineHeight: 1.65,
+                        }}
+                        codeTagProps={{
+                            style: {
+                                fontFamily:
+                                    'var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                            },
+                        }}
+                    >
+                        {value}
+                    </SyntaxHighlighter>
+                </div>
             )}
         </motion.div>
     );
 }
 
 export function MarkdownMessage({ content, className }: MarkdownMessageProps) {
-    const trimmed = useMemo(() => content.trimEnd(), [content]);
+    const { thinking, rest } = useMemo(() => parseThinkingBlocks(content), [content]);
+    const trimmed = useMemo(() => rest.trimEnd(), [rest]);
 
     return (
         <div className={clsx("text-white/80 leading-relaxed text-[1em]", className)}>
+            {/* Render thinking block if present */}
+            {thinking && <ThinkingBlock content={thinking} defaultExpanded={true} />}
+
+            {/* Render rest of content */}
             <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{

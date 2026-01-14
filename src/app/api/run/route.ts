@@ -6,29 +6,28 @@ export const runtime = 'nodejs';
 
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
+
+    // List sessions endpoint
+    if (searchParams.get('list') === 'true') {
+        const limit = parseInt(searchParams.get('limit') || '10', 10);
+        const sessions = ledger.listRuns(limit);
+        return NextResponse.json({ sessions });
+    }
+
     let runId = searchParams.get('runId');
     let isNew = false;
 
-    // 1. Auto-Resume Logic
+    // Fresh session by default (no auto-resume)
+    // Only resume if explicit runId is provided
     if (!runId) {
-        const latest = ledger.getLatestRunId();
-        if (latest) {
-            runId = latest;
-        } else {
-            runId = `RUN-${crypto.randomUUID()}`;
-            isNew = true;
-        }
+        runId = `RUN-${crypto.randomUUID()}`;
+        isNew = true;
     }
 
-    // 2. Load State (Snapshot)
-    // Even if it's "new" in this request, it might exist in DB if passed via param.
-    // So we always try to load snapshot.
-    const snapshot = ledger.loadLatestSnapshot(runId!);
-    
-    // 3. Ensure Runtime is Active (Idempotent)
-    // If the server restarted, the in-memory runtimeManager is empty.
-    // We strictly use the manager to get (or re-create) the runtime instance.
-    // This does NOT trigger side effects, just ensures the object exists.
+    // Load State (Snapshot) - only if resuming existing session
+    const snapshot = runId && !isNew ? ledger.loadLatestSnapshot(runId) : null;
+
+    // Ensure Runtime is Active (Idempotent)
     runtimeManager.getRuntime(runId!);
 
     if (isNew) {

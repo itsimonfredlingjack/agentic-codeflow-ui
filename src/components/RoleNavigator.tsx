@@ -24,14 +24,20 @@ export function RoleNavigator({ currentPhase, onSetPhase }: RoleNavigatorProps) 
                         key={roleId}
                         onClick={() => onSetPhase(roleId)}
                         className={clsx(
-                            "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-200",
+                            "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium press-effect",
+                            "transition-all duration-200",
                             isActive
-                                ? "bg-white/10 text-white shadow-[0_0_10px_-3px_var(--active-aura)]"
+                                ? "bg-white/10 text-white"
                                 : "text-white/40 hover:text-white/70 hover:bg-white/5"
                         )}
-                        style={isActive ? { color: role.color, borderColor: role.color } : undefined}
+                        style={isActive ? {
+                            color: role.color,
+                            boxShadow: `0 0 12px -2px ${role.color}`
+                        } : undefined}
                     >
-                        {getIcon(roleId, 14)}
+                        <span className={isActive ? "phase-glow" : ""}>
+                            {getIcon(roleId, 14)}
+                        </span>
                         <span className={clsx(
                             "tracking-wide",
                             isActive ? "font-semibold" : "font-normal"

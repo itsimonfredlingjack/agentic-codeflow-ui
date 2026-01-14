@@ -168,7 +168,7 @@ class TaskLedger {
     const stmt = this.db.prepare('SELECT state_value, context FROM snapshots WHERE run_id = ? ORDER BY timestamp DESC LIMIT 1');
     const row = stmt.get(runId) as { state_value: string; context: string } | undefined;
     if (!row) return null;
-    
+
     try {
       return {
         stateValue: row.state_value,
@@ -180,6 +180,35 @@ class TaskLedger {
         context: null
       };
     }
+  }
+
+  public listRuns(limit = 10): Array<{ id: string; createdAt: number; eventCount: number }> {
+    if (this.useInMemory) {
+      const runList = Array.from(this.runs.entries())
+        .map(([id, createdAt]) => ({
+          id,
+          createdAt,
+          eventCount: this.events.filter(e => e.runId === id).length
+        }))
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, limit);
+      return runList;
+    }
+
+    const stmt = this.db.prepare(`
+      SELECT r.id, r.created_at, COUNT(e.id) as event_count
+      FROM runs r
+      LEFT JOIN event_log e ON r.id = e.run_id
+      GROUP BY r.id
+      ORDER BY r.created_at DESC
+      LIMIT ?
+    `);
+    const rows = stmt.all(limit) as Array<{ id: string; created_at: number; event_count: number }>;
+    return rows.map(r => ({
+      id: r.id,
+      createdAt: r.created_at * 1000, // Convert to ms
+      eventCount: r.event_count
+    }));
   }
 }
 

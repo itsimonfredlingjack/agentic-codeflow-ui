@@ -3,28 +3,31 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
 import type { ActionCardProps, OllamaChatMessage, AgentIntent } from '@/types';
 import type { RoleId } from '@/lib/roles';
+import { ROLES } from '@/lib/roles';
 import { AgentControls } from './AgentControls';
 import { useAgencyClient } from '@/lib/client';
 import { ShadowTerminal } from './ShadowTerminal';
 
+// Smart Context System
+import {
+    SessionContext,
+    createSessionContext,
+    buildPhasePrompt,
+    storePhaseOutput,
+    addError,
+    setUserRequest,
+    getContextSummary
+} from '@/lib/contextProvider';
 
 // Refactored Sub-Components
 import { WorkspaceInput } from './WorkspaceInput';
 import { WorkspaceHeader } from './WorkspaceHeader';
-import { ASCII_HEADERS, ASCII_LOGOS } from '@/lib/ascii';
+import { ASCII_LOGOS } from '@/lib/ascii';
 
 
-const DEFAULT_SYSTEM_PROMPT = `You are a helpful, compliant, and proactive AI coding assistant. Your primary goal is to help users by writing code, providing solutions, and answering questions directly and efficiently.
-
-Key behaviors:
-- Always write code snippets when requested, even if the request is brief or has minor typos
-- Be helpful and compliant - never refuse reasonable requests or ask for excessive clarification
-- If a request is unclear, make reasonable assumptions and proceed rather than asking many questions
-- When asked to write code, write it immediately without hesitation
-- Be direct and action-oriented, similar to Claude Haiku 4.5's helpfulness
-- Focus on being useful and getting things done rather than being overly cautious
-
-You are here to help, not to question or refuse. Write code, provide solutions, and assist users promptly.`;
+// System prompts are now dynamically generated per phase via contextProvider.ts
+// See: src/lib/roles.ts for phase-specific prompts
+// See: src/lib/contextProvider.ts for context injection logic
 
 // Helper to cap chat history: keep system prompt + last 20 non-system messages
 const capChatHistory = (history: OllamaChatMessage[]): OllamaChatMessage[] => {
@@ -32,6 +35,44 @@ const capChatHistory = (history: OllamaChatMessage[]): OllamaChatMessage[] => {
     const nonSystem = history.slice(1);
     const cappedNonSystem = nonSystem.slice(-20);
     return [history[0], ...cappedNonSystem];
+};
+
+// Auto-detect and wrap code in markdown fences if not already wrapped
+const ensureCodeFencing = (content: string): string => {
+    // Already has code fences? Return as-is
+    if (/```[\w]*\n/.test(content)) return content;
+
+    // Patterns that strongly suggest code
+    const codePatterns = [
+        /^(function|const|let|var|class|import|export|interface|type)\s+\w+/m,
+        /^(def|class|import|from|async def)\s+\w+/m,
+        /^\s*(if|for|while|switch|try)\s*\(/m,
+        /=>\s*{/,
+        /\(\)\s*{/,
+        /^<[A-Z]\w+/m, // JSX/TSX component
+        /^\s*return\s+/m,
+        /\w+\.\w+\(/,  // method calls
+    ];
+
+    const looksLikeCode = codePatterns.some(pattern => pattern.test(content));
+    const hasMultipleLines = content.split('\n').length > 3;
+    const hasIndentation = /^\s{2,}/m.test(content);
+
+    if (looksLikeCode && (hasMultipleLines || hasIndentation)) {
+        // Try to detect language
+        let lang = 'typescript'; // default
+        if (/^(def|class|import|from)\s+/m.test(content) && !/^(import|export)\s+.*from/m.test(content)) {
+            lang = 'python';
+        } else if (/^\$\s|^npm\s|^yarn\s|^git\s/m.test(content)) {
+            lang = 'bash';
+        } else if (/<[A-Z]\w+/.test(content) || /className=/.test(content)) {
+            lang = 'tsx';
+        }
+
+        return '```' + lang + '\n' + content.trim() + '\n```';
+    }
+
+    return content;
 };
 
 
@@ -57,26 +98,73 @@ interface AgentWorkspaceProps {
 export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onSendMessage }: AgentWorkspaceProps) {
     const [localStream, setLocalStream] = useState<StreamItem[]>(initialStream);
 
-    const [activeRole, setActiveRole] = useState<RoleId>('PLAN');
+    // Map currentPhase to RoleId
+    const phaseToRole = (phase: typeof currentPhase): RoleId => phase.toUpperCase() as RoleId;
+
+    const [activeRole, setActiveRole] = useState<RoleId>(phaseToRole(currentPhase));
+
+    // Smart Context System - session context persists across phase transitions
+    const initialSessionContext = useMemo(() => createSessionContext(), []);
+    const sessionContextRef = useRef<SessionContext>(initialSessionContext);
+
     const [chatHistory, setChatHistory] = useState<OllamaChatMessage[]>([
-        { role: 'system', content: DEFAULT_SYSTEM_PROMPT }
+        { role: 'system', content: buildPhasePrompt(activeRole, initialSessionContext) }
     ]);
     const hasHydratedStream = useRef(false);
     const prevRunIdRef = useRef(runId);
+    const prevPhaseRef = useRef(currentPhase);
 
     const { lastEvent, client } = useAgencyClient(runId);
+
+    // Sync activeRole with currentPhase and update system prompt
+    useEffect(() => {
+        if (prevPhaseRef.current === currentPhase) return;
+        const oldPhase = prevPhaseRef.current;
+        prevPhaseRef.current = currentPhase;
+        const newRole = phaseToRole(currentPhase);
+        queueMicrotask(() => setActiveRole(newRole));
+
+        // Add phase transition marker to stream
+        const transitionMarker: StreamItem = {
+            id: `phase-transition-${Date.now()}`,
+            runId,
+            type: 'log',
+            title: `PHASE: ${currentPhase.toUpperCase()}`,
+            content: `Switched from ${oldPhase.toUpperCase()} to ${currentPhase.toUpperCase()}`,
+            timestamp: new Date().toLocaleTimeString(),
+            phase: currentPhase,
+            agentId: 'SYSTEM',
+            severity: 'info'
+        };
+        setLocalStream(prev => [...prev, transitionMarker]);
+
+        // Update system prompt with new phase context
+        const newPrompt = buildPhasePrompt(newRole, sessionContextRef.current);
+        setChatHistory(prev => {
+            const nonSystem = prev.slice(1);
+            return [{ role: 'system', content: newPrompt }, ...nonSystem];
+        });
+
+        // Log phase transition for visibility
+        console.log(`[SmartContext] Phase transition: ${oldPhase} → ${currentPhase}`);
+        console.log(`[SmartContext] Context summary:\n${getContextSummary(sessionContextRef.current)}`);
+    }, [currentPhase, runId]);
 
     // Reset local state when run changes
     useEffect(() => {
         if (prevRunIdRef.current === runId) return;
         prevRunIdRef.current = runId;
         hasHydratedStream.current = false;
+
+        // Reset session context for new run
+        sessionContextRef.current = createSessionContext();
+
         queueMicrotask(() => {
             setLocalStream([]);
-
-            setChatHistory([{ role: 'system', content: DEFAULT_SYSTEM_PROMPT }]);
+            const freshPrompt = buildPhasePrompt(activeRole, sessionContextRef.current);
+            setChatHistory([{ role: 'system', content: freshPrompt }]);
         });
-    }, [runId]);
+    }, [runId, activeRole]);
 
     // Hydrate stream once per run (avoid clobbering optimistic UI)
     useEffect(() => {
@@ -85,8 +173,9 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
         hasHydratedStream.current = true;
 
         // Rebuild chat history from stream (simple reconstruction)
-        // Ideally, we would have the full chat history in the ledger, but for now we reconstruct context
-        const reconstructedHistory: OllamaChatMessage[] = [{ role: 'system', content: DEFAULT_SYSTEM_PROMPT }];
+        // Use current phase prompt (dynamic based on context)
+        const currentPrompt = buildPhasePrompt(activeRole, sessionContextRef.current);
+        const reconstructedHistory: OllamaChatMessage[] = [{ role: 'system', content: currentPrompt }];
         initialStream.forEach(item => {
             if (item.type === 'log' && item.title === 'User Prompt') {
                 reconstructedHistory.push({ role: 'user', content: item.content });
@@ -98,7 +187,7 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
             setChatHistory(capChatHistory(reconstructedHistory));
             setLocalStream((prev) => (prev.length === 0 ? initialStream : prev));
         });
-    }, [initialStream]);
+    }, [initialStream, activeRole]);
 
     // Handle Real-time Events
     useEffect(() => {
@@ -108,7 +197,6 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
 
         const correlationId = lastEvent.header.correlationId;
         const typingId = `typing-${correlationId}`;
-        const phaseHeader = ASCII_HEADERS[currentPhase.toUpperCase() as keyof typeof ASCII_HEADERS] || '';
 
         const item: StreamItem = {
             id: `evt-${Date.now()}-${Math.random()}`,
@@ -133,6 +221,8 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                 item.title = 'STDERR';
                 item.content = lastEvent.content;
                 item.severity = 'error';
+                // Track errors in context for BUILD phase awareness
+                addError(sessionContextRef.current, `STDERR: ${lastEvent.content.slice(0, 200)}`);
                 break;
             case 'PROCESS_STARTED':
                 item.type = 'log';
@@ -149,13 +239,14 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                 item.type = 'security_gate';
                 item.title = 'Permission Required';
                 item.content = `Command: ${lastEvent.command}`;
-                item.payload = { policy: 'Manual Approval', status: 'warn' };
+                item.payload = { requestId: lastEvent.requestId, command: lastEvent.command, riskLevel: lastEvent.riskLevel };
                 break;
             case 'WORKFLOW_ERROR':
                 item.type = 'error';
                 item.title = 'Workflow Error';
                 item.content = lastEvent.error;
                 item.severity = lastEvent.severity === 'fatal' ? 'error' : 'warn';
+                addError(sessionContextRef.current, `Workflow: ${lastEvent.error.slice(0, 200)}`);
                 break;
             case 'OLLAMA_CHAT_STARTED':
                 queueMicrotask(() => {
@@ -179,16 +270,29 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                     });
                 });
                 return;
-            case 'OLLAMA_CHAT_COMPLETED':
+            case 'OLLAMA_CHAT_COMPLETED': {
+                const rawContent = lastEvent.response.message.content;
+                const processedContent = ensureCodeFencing(rawContent);
                 item.type = 'code';
                 item.title = 'Qwen';
-                item.content = `${phaseHeader}\n${lastEvent.response.message.content}`;
+                item.content = processedContent;
                 item.agentId = 'QWEN';
+
+                // Store phase output for smart context pipeline
+                storePhaseOutput(sessionContextRef.current, activeRole, rawContent);
+                console.log(`[SmartContext] Stored ${activeRole} phase output (${rawContent.length} chars)`);
+                console.log(`[DEBUG] OLLAMA_CHAT_COMPLETED received, content length: ${rawContent.length}`);
+                console.log(`[DEBUG] Removing typing indicator: ${typingId}`);
+
                 queueMicrotask(() => {
-                    setLocalStream((prev) => prev.filter((x) => x.id !== typingId));
-                    setChatHistory(prev => capChatHistory([...prev, { role: 'assistant', content: lastEvent.response.message.content }]));
+                    setLocalStream((prev) => {
+                        console.log(`[DEBUG] Before filter: ${prev.length} items, typing found: ${prev.some(x => x.id === typingId)}`);
+                        return prev.filter((x) => x.id !== typingId);
+                    });
+                    setChatHistory(prev => capChatHistory([...prev, { role: 'assistant', content: rawContent }]));
                 });
                 break;
+            }
             case 'OLLAMA_CHAT_FAILED':
                 item.type = 'error';
                 item.title = 'Ollama Chat Failed';
@@ -217,8 +321,12 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                 return;
         }
 
+        console.log(`[DEBUG] Adding item to stream: ${item.title}, type: ${item.type}`);
         queueMicrotask(() => {
-            setLocalStream(prev => [...prev, item]);
+            setLocalStream(prev => {
+                console.log(`[DEBUG] Stream append: ${prev.length} → ${prev.length + 1} items`);
+                return [...prev, item];
+            });
         });
     }, [lastEvent, currentPhase, runId]);
 
@@ -258,14 +366,32 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                     'Omnibar Help',
                     [
                         'Commands:',
-                        '- /help, /models, /clear, /remember <note>, /pin <note>, /goal <text>',
+                        '- /help, /models, /clear, /resume, /context',
                         '- /chat <prompt>, /llm <prompt>, /exec <cmd>, /cmd <cmd>',
                         'Mentions:',
                         '- @plan, @build, @review, @deploy',
                         '- @engineer, @designer, @reviewer',
-                        '- @build-helper, @frontend-designer, @code-reviewer (beta)',
                         'Macros:',
                         '- !test, !lint, !build'
+                    ].join('\n')
+                );
+                return;
+            }
+            case 'context': {
+                // Debug command to show smart context state
+                const summary = getContextSummary(sessionContextRef.current);
+                const phaseOutputs = Array.from(sessionContextRef.current.phaseOutputs.entries())
+                    .map(([phase, output]) => `${phase}: ${output.summary.slice(0, 100)}...`)
+                    .join('\n');
+                appendSystemLog(
+                    'Smart Context Status',
+                    [
+                        `Current Phase: ${activeRole}`,
+                        `Role: ${ROLES[activeRole].label}`,
+                        '',
+                        summary,
+                        '',
+                        phaseOutputs ? `Phase Outputs:\n${phaseOutputs}` : 'No phase outputs yet.'
                     ].join('\n')
                 );
                 return;
@@ -308,6 +434,34 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                 appendSystemLog('Init', 'Init command acknowledged (placeholder).');
                 return;
             }
+            case 'resume': {
+                appendSystemLog('Sessions', 'Fetching previous sessions...');
+                try {
+                    const res = await fetch('/api/run?list=true&limit=10');
+                    if (!res.ok) {
+                        appendSystemLog('Sessions', 'Failed to fetch sessions', 'error');
+                        return;
+                    }
+                    const data = await res.json();
+                    const sessions = data?.sessions || [];
+                    if (sessions.length === 0) {
+                        appendSystemLog('Sessions', 'No previous sessions found.');
+                        return;
+                    }
+                    const lines = sessions.map((s: { id: string; createdAt: number; eventCount: number }, i: number) => {
+                        const date = new Date(s.createdAt).toLocaleString();
+                        const isCurrent = s.id === runId;
+                        return `${i + 1}. ${s.id}${isCurrent ? ' (current)' : ''}\n   ${date} • ${s.eventCount} events`;
+                    });
+                    appendSystemLog(
+                        'Available Sessions',
+                        lines.join('\n\n') + '\n\nTo resume: reload page with ?runId=RUN-xxx'
+                    );
+                } catch (error) {
+                    appendSystemLog('Sessions', error instanceof Error ? error.message : String(error), 'error');
+                }
+                return;
+            }
             default:
                 appendSystemLog('Command', `Unknown command: /${command}`, 'warn');
         }
@@ -322,6 +476,11 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
             : parsed.mode === 'chat'
                 ? 'User Prompt'
                 : 'User Command';
+
+        // Store user request in context (for PLAN phase context injection)
+        if (parsed.mode === 'chat') {
+            setUserRequest(sessionContextRef.current, payload);
+        }
 
         // Optimistic UI
         const userMsg: StreamItem = {
@@ -345,7 +504,8 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
             if (client) {
                 const intent: OllamaChatIntent = {
                     type: 'INTENT_OLLAMA_CHAT',
-                    messages: nextHistory
+                    messages: nextHistory,
+                    model: ROLES[activeRole].model  // Use role-specific model
                 };
                 try {
                     await client.send(intent);
@@ -416,7 +576,6 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
 
     return (
         <div className="flex flex-col h-full relative overflow-hidden bg-[hsl(var(--background))] rounded-xl group shadow-inner shadow-black/80 font-mono">
-            {/* Phase Aura Background REMOVED */}\n
 
             <WorkspaceHeader
                 currentPhase={currentPhase}
@@ -424,11 +583,32 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                 isProcessing={localStream.some(s => s.isTyping)}
             />
 
-
-
             {/* Stream Area */}
             <div className="flex-1 overflow-hidden relative">
-                <ShadowTerminal actions={localStream} splitView={currentPhase === 'build'} />
+                <ShadowTerminal
+                    actions={localStream}
+                    splitView={currentPhase === 'build'}
+                    onApprovePermission={(requestId) => {
+                        appendSystemLog('Permission', `Approved: ${requestId}`);
+                        void client.send({ type: 'INTENT_GRANT_PERMISSION', requestId }).catch((error) => {
+                            appendSystemLog(
+                                'Permission',
+                                error instanceof Error ? error.message : String(error),
+                                'error'
+                            );
+                        });
+                    }}
+                    onDenyPermission={(requestId) => {
+                        appendSystemLog('Permission', `Denied: ${requestId}`, 'warn');
+                        void client.send({ type: 'INTENT_DENY_PERMISSION', requestId }).catch((error) => {
+                            appendSystemLog(
+                                'Permission',
+                                error instanceof Error ? error.message : String(error),
+                                'error'
+                            );
+                        });
+                    }}
+                />
             </div>
 
             <AgentControls phase={currentPhase} />

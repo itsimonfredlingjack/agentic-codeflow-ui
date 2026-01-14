@@ -1,4 +1,6 @@
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { spawn } = require('child_process');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const fs = require('fs');
 
 const out = fs.openSync('./serve.log', 'a');

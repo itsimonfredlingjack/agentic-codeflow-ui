@@ -162,6 +162,290 @@ textarea {
   }
 }
 
+/* --- Thinking Indicator Animations --- */
+
+.thinking-cursor {
+  animation: cursor-blink 1s step-end infinite;
+}
+
+@keyframes cursor-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.scan-line-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--indicator-color, var(--emerald)) 50%,
+    transparent 100%
+  );
+  opacity: 0.3;
+  animation: scan-line 2s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes scan-line {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(40px); }
+}
+
+.thinking-progress {
+  animation: progress-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes progress-pulse {
+  0%, 100% {
+    width: 20%;
+    opacity: 0.6;
+  }
+  50% {
+    width: 80%;
+    opacity: 1;
+  }
+}
+
+.thinking-dots .dot {
+  animation: dot-fade 1.5s ease-in-out infinite;
+  opacity: 0.3;
+}
+
+.thinking-dots .dot:nth-child(1) { animation-delay: 0s; }
+.thinking-dots .dot:nth-child(2) { animation-delay: 0.3s; }
+.thinking-dots .dot:nth-child(3) { animation-delay: 0.6s; }
+
+@keyframes dot-fade {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+/* --- UI Polish: Transitions & Micro-interactions --- */
+
+/* Smooth phase transitions */
+.phase-transition {
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+}
+
+/* Interactive card hover */
+.interactive-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.interactive-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.interactive-card:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+/* Focus glow for inputs */
+.focus-glow:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(var(--emerald-rgb, 74, 222, 128), 0.3),
+              0 0 20px rgba(var(--emerald-rgb, 74, 222, 128), 0.2);
+}
+
+/* Phase-colored glow */
+.phase-glow {
+  filter: drop-shadow(0 0 8px currentColor);
+}
+
+/* Button press effect */
+.press-effect {
+  transition: transform 0.1s ease, opacity 0.1s ease;
+}
+
+.press-effect:active {
+  transform: scale(0.97);
+  opacity: 0.9;
+}
+
+/* --- CRT/Retro Effects --- */
+
+/* Subtle scanlines overlay */
+.crt-scanlines {
+  position: relative;
+}
+
+.crt-scanlines::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 100;
+}
+
+/* Screen flicker (very subtle) */
+@keyframes screen-flicker {
+  0%, 100% { opacity: 1; }
+  92% { opacity: 1; }
+  93% { opacity: 0.98; }
+  94% { opacity: 1; }
+}
+
+.crt-flicker {
+  animation: screen-flicker 8s infinite;
+}
+
+/* Text glow pulse */
+@keyframes glow-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 4px currentColor);
+  }
+  50% {
+    filter: drop-shadow(0 0 8px currentColor) drop-shadow(0 0 12px currentColor);
+  }
+}
+
+.glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* Smooth fade-in for new elements */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in-up {
+  animation: fade-in-up 0.2s ease-out;
+}
+
+/* --- Respect reduced motion --- */
+@media (prefers-reduced-motion: reduce) {
+  .interactive-card,
+  .phase-transition,
+  .press-effect,
+  .focus-glow {
+    transition: none !important;
+  }
+
+  .crt-flicker,
+  .glow-pulse,
+  .fade-in-up,
+  .thinking-cursor,
+  .thinking-progress,
+  .thinking-dots .dot,
+  .scan-line-overlay {
+    animation: none !important;
+  }
+}
+
+/* --- Code Block Glow (IDE-style) --- */
+
+/* Language-specific glow colors */
+:root {
+  --code-glow-typescript: 210 100% 50%;  /* Blue */
+  --code-glow-javascript: 45 100% 50%;   /* Yellow */
+  --code-glow-python: 150 100% 40%;      /* Green */
+  --code-glow-bash: 150 100% 40%;        /* Green */
+  --code-glow-css: 330 100% 60%;         /* Pink */
+  --code-glow-html: 25 100% 50%;         /* Orange */
+  --code-glow-json: 0 0% 50%;            /* Gray */
+  --code-glow-default: var(--sapphire);  /* Blue fallback */
+}
+
+/* Main glow wrapper */
+.code-glow {
+  position: relative;
+  box-shadow:
+    0 0 20px -5px hsl(var(--code-glow-color, var(--code-glow-default)) / 0.25),
+    inset 0 1px 0 hsl(0 0% 100% / 0.05);
+  border: 1px solid hsl(var(--code-glow-color, var(--code-glow-default)) / 0.2) !important;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.code-glow:hover {
+  box-shadow:
+    0 0 30px -5px hsl(var(--code-glow-color, var(--code-glow-default)) / 0.4),
+    inset 0 1px 0 hsl(0 0% 100% / 0.08);
+  border-color: hsl(var(--code-glow-color, var(--code-glow-default)) / 0.35) !important;
+}
+
+/* Language-specific glow classes */
+.code-glow-typescript { --code-glow-color: var(--code-glow-typescript); }
+.code-glow-tsx { --code-glow-color: var(--code-glow-typescript); }
+.code-glow-javascript { --code-glow-color: var(--code-glow-javascript); }
+.code-glow-jsx { --code-glow-color: var(--code-glow-javascript); }
+.code-glow-python { --code-glow-color: var(--code-glow-python); }
+.code-glow-bash { --code-glow-color: var(--code-glow-bash); }
+.code-glow-shell { --code-glow-color: var(--code-glow-bash); }
+.code-glow-css { --code-glow-color: var(--code-glow-css); }
+.code-glow-scss { --code-glow-color: var(--code-glow-css); }
+.code-glow-html { --code-glow-color: var(--code-glow-html); }
+.code-glow-json { --code-glow-color: var(--code-glow-json); }
+
+/* Line number gutter */
+.code-line-numbers {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 44px;
+  background: hsl(0 0% 0% / 0.4);
+  border-right: 1px solid hsl(0 0% 100% / 0.08);
+  padding-top: 12px;
+  text-align: right;
+  font-size: 0.75em;
+  line-height: 1.65;
+  color: hsl(0 0% 100% / 0.25);
+  user-select: none;
+  overflow: hidden;
+}
+
+.code-line-numbers span {
+  display: block;
+  padding-right: 10px;
+}
+
+/* Language icon in header */
+.code-lang-icon {
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
+}
+
+/* Code block header enhancement */
+.code-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: hsl(0 0% 0% / 0.4);
+  border-bottom: 1px solid hsl(0 0% 100% / 0.08);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: hsl(0 0% 100% / 0.5);
+}
+
+.code-header-lang {
+  color: hsl(var(--code-glow-color, var(--code-glow-default)));
+}
+
 /* Omnibar */
 .omnibar-wrapper {
   background: hsl(var(--panel-bg));
