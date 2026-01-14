@@ -5,6 +5,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import clsx from 'clsx';
 import { ActionCardProps, type ActionType } from '@/types';
 import { MarkdownMessage } from './MarkdownMessage';
+import { ThinkingIndicator } from './ThinkingIndicator';
 
 // HSL vars from globals.css
 const typeColors: Record<ActionType, string> = {
@@ -24,9 +25,10 @@ const typeColors: Record<ActionType, string> = {
 type ActionCardExtraProps = ActionCardProps & {
     isUser?: boolean;
     isTyping?: boolean;
+    phase?: 'plan' | 'build' | 'review' | 'deploy';
 };
 
-export function ActionCard({ type, title, content, timestamp, agentId, severity, isUser, isTyping }: ActionCardExtraProps) {
+export function ActionCard({ type, title, content, timestamp, agentId, severity, isUser, isTyping, phase }: ActionCardExtraProps) {
     const shouldReduceMotion = useReducedMotion();
     const accent = isUser ? 'var(--emerald)' : typeColors[type];
     const who = isUser ? 'YOU' : agentId || 'SYS';
@@ -95,7 +97,7 @@ export function ActionCard({ type, title, content, timestamp, agentId, severity,
 
                 <div className="col-start-3">
                     {isTyping ? (
-                        <span className="text-white/40 animate-pulse text-[15px]">…</span>
+                        <ThinkingIndicator phase={phase} compact />
                     ) : (
                         shouldUseBlockFolding ? (
                             <div className="space-y-2">

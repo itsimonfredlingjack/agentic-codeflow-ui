@@ -1,6 +1,8 @@
 // src/lib/runtime.ts
 import { Subject } from 'rxjs';
 import { v4 as uuidv4 } from 'uuid';
+import type { ParsedCommand } from '@/lib/safeCommand';
+import { decideCommand } from '@/lib/safeCommand';
 import { AgentIntent, RuntimeEvent, MessageHeader, OllamaChatMessage, OllamaChatResponse } from '@/types';
 import { ledger } from './ledger';
 import { TerminalService } from './terminal';
@@ -10,11 +12,25 @@ export class HostRuntime {
   private eventStream = new Subject<RuntimeEvent>();
   private terminal = new TerminalService();
   private activeRunId: string;
+  private pendingCommands = new Map<string, { header: MessageHeader; command: ParsedCommand }>();
 
   constructor(runId: string) {
     this.activeRunId = runId;
     ledger.createRun(runId);
     this.emit({ type: 'SYS_READY', header: this.createHeader(), runId });
+  }
+
+  /**
+   * Update the active run ID - used when switching sessions
+   * This ensures events are stored under the correct session
+   */
+  public setActiveRunId(runId: string) {
+    if (this.activeRunId !== runId) {
+      console.log(`[Runtime] Switching session: ${this.activeRunId} → ${runId}`);
+      this.activeRunId = runId;
+      this.pendingCommands.clear();
+      ledger.createRun(runId);
+    }
   }
 
   public get events$() {
@@ -25,33 +41,110 @@ export class HostRuntime {
     // 1. Logging intent handled elsewhere or here
     console.log(`[Runtime] Dispatching: ${intent.type}`);
 
-    // 2. Permission Gate / Middleware Logic (Simplified)
-    if (intent.type === 'INTENT_EXEC_CMD') {
-        const isRisky = intent.command.includes('rm -rf'); // Basic check
-        if (isRisky) {
-            const requestId = uuidv4();
-            this.emit({ 
-                type: 'PERMISSION_REQUESTED', 
-                header: intent.header, 
-                requestId, 
-                command: intent.command, 
-                riskLevel: 'high' 
-            });
-            // Here we would store the pending command in a Map and return
-            return; 
+    switch (intent.type) {
+      case 'INTENT_EXEC_CMD': {
+        const decision = decideCommand(intent.command);
+
+        if (decision.kind === 'deny') {
+          this.emit({
+            type: 'SECURITY_VIOLATION',
+            header: intent.header,
+            policy: 'COMMAND_DENIED',
+            attemptedPath: intent.command,
+          });
+          this.emit({
+            type: 'WORKFLOW_ERROR',
+            header: intent.header,
+            error: decision.reason,
+            severity: 'warn',
+          });
+          return;
         }
 
-        // Execute if safe
-        this.terminal.execute(intent.header, intent.command, (event) => this.emit(event));
-    }
+        if (decision.kind === 'require_permission') {
+          const requestId = uuidv4();
+          this.pendingCommands.set(requestId, { header: intent.header, command: decision.parsed });
+          this.emit({
+            type: 'PERMISSION_REQUESTED',
+            header: intent.header,
+            requestId,
+            command: decision.parsed.original,
+            riskLevel: 'high',
+          });
+          this.emit({
+            type: 'WORKFLOW_ERROR',
+            header: intent.header,
+            error: `Permission required: ${decision.reason}`,
+            severity: 'warn',
+          });
+          return;
+        }
 
-    // 3. Ollama Integration
-    if (intent.type === 'INTENT_OLLAMA_GENERATE') {
-      this.handleOllamaGenerate(intent);
-    }
+        this.terminal.executeParsed(
+          intent.header,
+          decision.parsed.program,
+          decision.parsed.args,
+          (event) => this.emit(event)
+        );
+        return;
+      }
 
-    if (intent.type === 'INTENT_OLLAMA_CHAT') {
-      this.handleOllamaChat(intent);
+      case 'INTENT_GRANT_PERMISSION': {
+        const pending = this.pendingCommands.get(intent.requestId);
+        if (!pending) {
+          this.emit({
+            type: 'WORKFLOW_ERROR',
+            header: intent.header,
+            error: `No pending command for requestId=${intent.requestId}`,
+            severity: 'warn',
+          });
+          return;
+        }
+
+        this.pendingCommands.delete(intent.requestId);
+        this.terminal.executeParsed(
+          pending.header,
+          pending.command.program,
+          pending.command.args,
+          (event) => this.emit(event)
+        );
+        return;
+      }
+
+      case 'INTENT_DENY_PERMISSION': {
+        const pending = this.pendingCommands.get(intent.requestId);
+        this.pendingCommands.delete(intent.requestId);
+        this.emit({
+          type: 'WORKFLOW_ERROR',
+          header: intent.header,
+          error: pending ? `Permission denied: ${pending.command.original}` : 'Permission denied',
+          severity: 'warn',
+        });
+        return;
+      }
+
+      case 'INTENT_CANCEL': {
+        this.terminal.kill(intent.targetCorrelationId);
+        this.emit({
+          type: 'WORKFLOW_ERROR',
+          header: intent.header,
+          error: `Cancelled process: ${intent.targetCorrelationId}`,
+          severity: 'warn',
+        });
+        return;
+      }
+
+      case 'INTENT_OLLAMA_GENERATE':
+        void this.handleOllamaGenerate(intent);
+        return;
+
+      case 'INTENT_OLLAMA_CHAT':
+        void this.handleOllamaChat(intent);
+        return;
+
+      case 'INTENT_START_BUILD':
+      case 'INTENT_RESET':
+        return;
     }
   }
 
@@ -230,7 +323,8 @@ export class HostRuntime {
 
   private emit(event: RuntimeEvent) {
     if (event.type !== 'OLLAMA_BIT') {
-      ledger.appendEvent(this.activeRunId, event);
+      ledger.createRun(event.header.sessionId);
+      ledger.appendEvent(event.header.sessionId, event);
     }
     this.eventStream.next(event);
   }

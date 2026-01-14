@@ -115,7 +115,12 @@ export function WorkspaceInput({ currentPhase, config, onSend, onSystemCommand }
         if (text.startsWith('$')) return true;
         if (text.startsWith('./') || text.startsWith('../')) return true;
         if (/[|&]{2}|\|/.test(text)) return true;
-        return /^(npm|npx|pnpm|yarn|bun|git|ls|cd|cat|rg|grep|node|python|pip|docker|kubectl|make|tsc|eslint)\b/i.test(text);
+        // Only match if it looks like a real command (short, has flags, or specific patterns)
+        // Exclude sentences (5+ words) - those are likely chat messages
+        const wordCount = text.split(/\s+/).length;
+        if (wordCount >= 5) return false;
+        // Match common CLI commands at start
+        return /^(npm|npx|pnpm|yarn|bun|git|ls|cd|cat|rg|grep|node|python|pip|docker|kubectl|make|tsc|eslint)\s/i.test(text);
     };
 
     const parseInput = (raw: string): ParsedInput => {
@@ -157,9 +162,9 @@ export function WorkspaceInput({ currentPhase, config, onSend, onSystemCommand }
             }
         }
 
-        const mode = isLikelyTerminalCommand(text)
-            ? 'terminal'
-            : (currentPhase === 'plan' || currentPhase === 'review' ? 'chat' : 'terminal');
+        // Default to chat for all phases unless it looks like a terminal command
+        // Users can always use /exec or /cmd to force terminal mode
+        const mode = isLikelyTerminalCommand(text) ? 'terminal' : 'chat';
         return { mode, payload: text, agentTarget };
     };
 
