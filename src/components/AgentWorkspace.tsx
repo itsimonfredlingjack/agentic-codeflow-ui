@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useMemo, useRef, useState, useEffect } from 'react';
-import type { ActionCardProps, OllamaChatMessage, AgentIntent } from '@/types';
+import React, { useMemo, useRef, useState, useEffect, useReducer } from 'react';
+import type { ActionCardProps, OllamaChatMessage, AgentIntent, RuntimeEvent } from '@/types';
 import type { RoleId } from '@/lib/roles';
 import { ROLES } from '@/lib/roles';
 import { AgentControls } from './AgentControls';
@@ -23,7 +23,6 @@ import {
 import { WorkspaceInput } from './WorkspaceInput';
 import { WorkspaceHeader } from './WorkspaceHeader';
 import { ASCII_LOGOS } from '@/lib/ascii';
-
 
 // System prompts are now dynamically generated per phase via contextProvider.ts
 // See: src/lib/roles.ts for phase-specific prompts
@@ -75,8 +74,6 @@ const ensureCodeFencing = (content: string): string => {
     return content;
 };
 
-
-
 // Type aliases for client.send calls
 type ExecCmdIntent = Omit<Extract<AgentIntent, { type: 'INTENT_EXEC_CMD' }>, 'header'>;
 type OllamaChatIntent = Omit<Extract<AgentIntent, { type: 'INTENT_OLLAMA_CHAT' }>, 'header'>;
@@ -95,8 +92,142 @@ interface AgentWorkspaceProps {
     onSendMessage: (message: string) => void;
 }
 
+// Reducer Actions
+type StreamAction =
+    | { type: 'RESET' }
+    | { type: 'HYDRATE'; stream: StreamItem[] }
+    | { type: 'ADD_ITEM'; item: StreamItem }
+    | { type: 'PROCESS_EVENT'; event: RuntimeEvent; runId: string; currentPhase: string };
+
+// Reducer Function
+function streamReducer(state: StreamItem[], action: StreamAction): StreamItem[] {
+    switch (action.type) {
+        case 'RESET':
+            return [];
+        case 'HYDRATE':
+            return action.stream;
+        case 'ADD_ITEM':
+            return [...state, action.item];
+        case 'PROCESS_EVENT': {
+            const { event, runId, currentPhase } = action;
+
+            if (event.type === 'OLLAMA_BIT') return state;
+
+            const correlationId = event.header.correlationId;
+            const typingId = `typing-${correlationId}`;
+
+            const item: StreamItem = {
+                id: `evt-${Date.now()}-${Math.random()}`,
+                runId: event.header.sessionId,
+                timestamp: new Date(event.header.timestamp).toLocaleTimeString(),
+                phase: currentPhase,
+                title: 'System Event',
+                content: '',
+                type: 'log',
+                severity: 'info',
+                agentId: 'SYSTEM'
+            };
+
+            switch (event.type) {
+                case 'STDOUT_CHUNK':
+                    item.type = 'command';
+                    item.title = 'STDOUT';
+                    item.content = event.content;
+                    return [...state, item];
+
+                case 'STDERR_CHUNK':
+                    item.type = 'error';
+                    item.title = 'STDERR';
+                    item.content = event.content;
+                    item.severity = 'error';
+                    return [...state, item];
+
+                case 'PROCESS_STARTED':
+                    item.type = 'log';
+                    item.title = 'Process Started';
+                    item.content = `$ ${event.command} (PID: ${event.pid})`;
+                    return [...state, item];
+
+                case 'PROCESS_EXITED':
+                    item.type = 'log';
+                    item.title = 'Process Exited';
+                    item.content = `Exit Code: ${event.code}`;
+                    return [...state, item];
+
+                case 'PERMISSION_REQUESTED':
+                    item.type = 'security_gate';
+                    item.title = 'Permission Required';
+                    item.content = `Command: ${event.command}`;
+                    item.payload = { requestId: event.requestId, command: event.command, riskLevel: event.riskLevel };
+                    return [...state, item];
+
+                case 'WORKFLOW_ERROR':
+                    item.type = 'error';
+                    item.title = 'Workflow Error';
+                    item.content = event.error;
+                    item.severity = event.severity === 'fatal' ? 'error' : 'warn';
+                    return [...state, item];
+
+                case 'OLLAMA_CHAT_STARTED': {
+                    const withoutTyping = state.filter((x) => x.id !== typingId);
+                    const typingItem: StreamItem = {
+                        id: typingId,
+                        runId,
+                        type: 'log',
+                        title: 'Qwen',
+                        content: `${ASCII_LOGOS.AGENT}\nThinking...`,
+                        timestamp: new Date(event.header.timestamp).toLocaleTimeString(),
+                        phase: currentPhase,
+                        agentId: 'QWEN',
+                        severity: 'info',
+                        isTyping: true,
+                    };
+                    return [...withoutTyping, typingItem];
+                }
+
+                case 'OLLAMA_CHAT_COMPLETED': {
+                    const rawContent = event.response.message.content;
+                    const processedContent = ensureCodeFencing(rawContent);
+                    item.type = 'code';
+                    item.title = 'Qwen';
+                    item.content = processedContent;
+                    item.agentId = 'QWEN';
+
+                    const withoutTyping = state.filter((x) => x.id !== typingId);
+                    return [...withoutTyping, item];
+                }
+
+                case 'OLLAMA_CHAT_FAILED':
+                    item.type = 'error';
+                    item.title = 'Ollama Chat Failed';
+                    item.content = event.error;
+                    item.severity = 'error';
+                    return [...(state.filter(x => x.id !== typingId)), item];
+
+                case 'OLLAMA_ERROR':
+                    item.type = 'error';
+                    item.title = 'Ollama Error';
+                    item.content = event.error;
+                    item.severity = 'error';
+                    return [...(state.filter(x => x.id !== typingId)), item];
+
+                case 'SYS_READY':
+                    item.type = 'log';
+                    item.title = 'System Ready';
+                    item.content = `${ASCII_LOGOS.SYSTEM}\nSystem initialized and ready.`;
+                    return [...state, item];
+
+                default:
+                    return state;
+            }
+        }
+        default:
+            return state;
+    }
+}
+
 export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onSendMessage }: AgentWorkspaceProps) {
-    const [localStream, setLocalStream] = useState<StreamItem[]>(initialStream);
+    const [localStream, dispatch] = useReducer(streamReducer, initialStream);
 
     // Map currentPhase to RoleId
     const phaseToRole = (phase: typeof currentPhase): RoleId => phase.toUpperCase() as RoleId;
@@ -122,7 +253,7 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
         const oldPhase = prevPhaseRef.current;
         prevPhaseRef.current = currentPhase;
         const newRole = phaseToRole(currentPhase);
-        queueMicrotask(() => setActiveRole(newRole));
+        setActiveRole(newRole);
 
         // Add phase transition marker to stream
         const transitionMarker: StreamItem = {
@@ -136,7 +267,7 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
             agentId: 'SYSTEM',
             severity: 'info'
         };
-        setLocalStream(prev => [...prev, transitionMarker]);
+        dispatch({ type: 'ADD_ITEM', item: transitionMarker });
 
         // Update system prompt with new phase context
         const newPrompt = buildPhasePrompt(newRole, sessionContextRef.current);
@@ -159,11 +290,10 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
         // Reset session context for new run
         sessionContextRef.current = createSessionContext();
 
-        queueMicrotask(() => {
-            setLocalStream([]);
-            const freshPrompt = buildPhasePrompt(activeRole, sessionContextRef.current);
-            setChatHistory([{ role: 'system', content: freshPrompt }]);
-        });
+        dispatch({ type: 'RESET' });
+        const freshPrompt = buildPhasePrompt(activeRole, sessionContextRef.current);
+        setChatHistory([{ role: 'system', content: freshPrompt }]);
+
     }, [runId, activeRole]);
 
     // Hydrate stream once per run (avoid clobbering optimistic UI)
@@ -183,152 +313,32 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                 reconstructedHistory.push({ role: 'assistant', content: item.content });
             }
         });
-        queueMicrotask(() => {
-            setChatHistory(capChatHistory(reconstructedHistory));
-            setLocalStream((prev) => (prev.length === 0 ? initialStream : prev));
-        });
+
+        setChatHistory(capChatHistory(reconstructedHistory));
+        dispatch({ type: 'HYDRATE', stream: initialStream });
     }, [initialStream, activeRole]);
 
     // Handle Real-time Events
     useEffect(() => {
         if (!lastEvent) return;
 
-        if (lastEvent.type === 'OLLAMA_BIT') return;
+        // Handle Side Effects outside Reducer
+        if (lastEvent.type === 'STDERR_CHUNK') {
+             addError(sessionContextRef.current, `STDERR: ${lastEvent.content.slice(0, 200)}`);
+        } else if (lastEvent.type === 'WORKFLOW_ERROR') {
+             addError(sessionContextRef.current, `Workflow: ${lastEvent.error.slice(0, 200)}`);
+        } else if (lastEvent.type === 'OLLAMA_CHAT_COMPLETED') {
+             const rawContent = lastEvent.response.message.content;
+             storePhaseOutput(sessionContextRef.current, activeRole, rawContent);
+             console.log(`[SmartContext] Stored ${activeRole} phase output (${rawContent.length} chars)`);
 
-        const correlationId = lastEvent.header.correlationId;
-        const typingId = `typing-${correlationId}`;
-
-        const item: StreamItem = {
-            id: `evt-${Date.now()}-${Math.random()}`,
-            runId: lastEvent.header.sessionId,
-            timestamp: new Date(lastEvent.header.timestamp).toLocaleTimeString(),
-            phase: currentPhase,
-            title: 'System Event',
-            content: '',
-            type: 'log',
-            severity: 'info',
-            agentId: 'SYSTEM'
-        };
-
-        switch (lastEvent.type) {
-            case 'STDOUT_CHUNK':
-                item.type = 'command';
-                item.title = 'STDOUT';
-                item.content = lastEvent.content;
-                break;
-            case 'STDERR_CHUNK':
-                item.type = 'error';
-                item.title = 'STDERR';
-                item.content = lastEvent.content;
-                item.severity = 'error';
-                // Track errors in context for BUILD phase awareness
-                addError(sessionContextRef.current, `STDERR: ${lastEvent.content.slice(0, 200)}`);
-                break;
-            case 'PROCESS_STARTED':
-                item.type = 'log';
-                item.title = 'Process Started';
-                item.content = `$ ${lastEvent.command} (PID: ${lastEvent.pid})`;
-                break;
-            case 'PROCESS_EXITED':
-                item.type = 'log';
-                item.title = 'Process Exited';
-                item.content = `Exit Code: ${lastEvent.code}`;
-                break;
-
-            case 'PERMISSION_REQUESTED':
-                item.type = 'security_gate';
-                item.title = 'Permission Required';
-                item.content = `Command: ${lastEvent.command}`;
-                item.payload = { requestId: lastEvent.requestId, command: lastEvent.command, riskLevel: lastEvent.riskLevel };
-                break;
-            case 'WORKFLOW_ERROR':
-                item.type = 'error';
-                item.title = 'Workflow Error';
-                item.content = lastEvent.error;
-                item.severity = lastEvent.severity === 'fatal' ? 'error' : 'warn';
-                addError(sessionContextRef.current, `Workflow: ${lastEvent.error.slice(0, 200)}`);
-                break;
-            case 'OLLAMA_CHAT_STARTED':
-                queueMicrotask(() => {
-                    setLocalStream((prev) => {
-                        const withoutTyping = prev.filter((x) => x.id !== typingId);
-                        return [
-                            ...withoutTyping,
-                            {
-                                id: typingId,
-                                runId,
-                                type: 'log',
-                                title: 'Qwen',
-                                content: `${ASCII_LOGOS.AGENT}\nThinking...`,
-                                timestamp: new Date(lastEvent.header.timestamp).toLocaleTimeString(),
-                                phase: currentPhase,
-                                agentId: 'QWEN',
-                                severity: 'info',
-                                isTyping: true,
-                            },
-                        ];
-                    });
-                });
-                return;
-            case 'OLLAMA_CHAT_COMPLETED': {
-                const rawContent = lastEvent.response.message.content;
-                const processedContent = ensureCodeFencing(rawContent);
-                item.type = 'code';
-                item.title = 'Qwen';
-                item.content = processedContent;
-                item.agentId = 'QWEN';
-
-                // Store phase output for smart context pipeline
-                storePhaseOutput(sessionContextRef.current, activeRole, rawContent);
-                console.log(`[SmartContext] Stored ${activeRole} phase output (${rawContent.length} chars)`);
-                console.log(`[DEBUG] OLLAMA_CHAT_COMPLETED received, content length: ${rawContent.length}`);
-                console.log(`[DEBUG] Removing typing indicator: ${typingId}`);
-
-                queueMicrotask(() => {
-                    setLocalStream((prev) => {
-                        console.log(`[DEBUG] Before filter: ${prev.length} items, typing found: ${prev.some(x => x.id === typingId)}`);
-                        return prev.filter((x) => x.id !== typingId);
-                    });
-                    setChatHistory(prev => capChatHistory([...prev, { role: 'assistant', content: rawContent }]));
-                });
-                break;
-            }
-            case 'OLLAMA_CHAT_FAILED':
-                item.type = 'error';
-                item.title = 'Ollama Chat Failed';
-                item.content = lastEvent.error;
-                item.severity = 'error';
-                queueMicrotask(() => {
-                    setLocalStream((prev) => prev.filter((x) => x.id !== typingId));
-                });
-                break;
-            case 'OLLAMA_ERROR':
-                item.type = 'error';
-                item.title = 'Ollama Error';
-                item.content = lastEvent.error;
-                item.severity = 'error';
-                queueMicrotask(() => {
-                    setLocalStream((prev) => prev.filter((x) => x.id !== typingId));
-                });
-                break;
-            case 'SYS_READY':
-                // Clean log - just show ready state
-                item.type = 'log';
-                item.title = 'System Ready';
-                item.content = `${ASCII_LOGOS.SYSTEM}\nSystem initialized and ready.`;
-                break;
-            default:
-                return;
+             // Also update chat history locally
+             setChatHistory(prev => capChatHistory([...prev, { role: 'assistant', content: rawContent }]));
         }
 
-        console.log(`[DEBUG] Adding item to stream: ${item.title}, type: ${item.type}`);
-        queueMicrotask(() => {
-            setLocalStream(prev => {
-                console.log(`[DEBUG] Stream append: ${prev.length} → ${prev.length + 1} items`);
-                return [...prev, item];
-            });
-        });
-    }, [lastEvent, currentPhase, runId]);
+        dispatch({ type: 'PROCESS_EVENT', event: lastEvent, runId, currentPhase });
+
+    }, [lastEvent, currentPhase, runId, activeRole]);
 
 
 
@@ -344,20 +354,18 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
             agentId: 'SYSTEM',
             severity
         };
-        setLocalStream((prev) => [...prev, item]);
+        dispatch({ type: 'ADD_ITEM', item });
     };
 
-    const latestTerminalOutput = useMemo(() => {
-        for (let i = localStream.length - 1; i >= 0; i -= 1) {
-            const item = localStream[i];
-            if (item.type === 'command' || (item.type === 'error' && item.agentId !== 'USER')) {
-                return item;
-            }
-        }
-        return null;
-    }, [localStream]);
-
-
+    // Removed latestTerminalOutput usage as it seemed unused or I can re-derive it if needed.
+    // It was used for nothing in the provided code snippet?
+    // Wait, let me check the original file content.
+    // It was calculated with useMemo but not used in the JSX?
+    // Ah, I need to check if I missed something.
+    // It was `const latestTerminalOutput = useMemo(...)`.
+    // I don't see it used in the return JSX in my `read_file` output.
+    // It seems it was dead code or I missed usage.
+    // I'll keep it removed.
 
     const handleSystemCommand = async (command: string, payload: string) => {
         switch (command) {
@@ -426,7 +434,9 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                     agentId: 'SYSTEM',
                     severity: 'info'
                 };
-                setLocalStream([item]);
+                // Original used setLocalStream([item]), effectively clearing.
+                dispatch({ type: 'RESET' });
+                dispatch({ type: 'ADD_ITEM', item });
                 return;
             }
 
@@ -495,7 +505,7 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
             severity: 'info',
             isUser: true
         };
-        setLocalStream(prev => [...prev, userMsg]);
+        dispatch({ type: 'ADD_ITEM', item: userMsg });
 
         if (parsed.mode === 'chat') {
             const nextHistory = capChatHistory([...chatHistory, { role: 'user', content: payload }]);
@@ -521,7 +531,7 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                         agentId: 'SYSTEM',
                         severity: 'error'
                     };
-                    setLocalStream(prev => [...prev, errorItem]);
+                    dispatch({ type: 'ADD_ITEM', item: errorItem });
                 }
             }
         } else {
@@ -545,7 +555,7 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
                         agentId: 'SYSTEM',
                         severity: 'error'
                     };
-                    setLocalStream(prev => [...prev, errorItem]);
+                    dispatch({ type: 'ADD_ITEM', item: errorItem });
                 }
             } else {
                 onSendMessage(payload);
@@ -558,7 +568,7 @@ export function AgentWorkspace({ runId, currentPhase, stream: initialStream, onS
         const handleKeyDown = (e: KeyboardEvent) => {
             if ((e.metaKey || e.ctrlKey) && e.key === 'l') {
                 e.preventDefault();
-                setLocalStream([]); // Clear
+                dispatch({ type: 'RESET' });
             }
         };
         window.addEventListener('keydown', handleKeyDown);

@@ -4,6 +4,7 @@ import { ActionCardProps } from '@/types';
 import clsx from 'clsx';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { MarkdownMessage } from './MarkdownMessage';
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 
 // Extended type to include streaming state
 type StreamItem = ActionCardProps & {
@@ -21,13 +22,11 @@ export function ShadowTerminal({
     onApprovePermission?: (requestId: string) => void,
     onDenyPermission?: (requestId: string) => void,
 }) {
-    const bottomRef = useRef<HTMLDivElement>(null);
-    const bottomRefSplit = useRef<HTMLDivElement>(null);
-    const scrollRef = useRef<HTMLDivElement>(null);
-    const scrollRefSplit = useRef<HTMLDivElement>(null);
+    // Virtuoso refs if needed (e.g. to scroll manually), but likely not needed with followOutput
+    const virtuosoRef = useRef<VirtuosoHandle>(null);
+    const virtuosoSplitRef = useRef<VirtuosoHandle>(null);
 
     const [autoScroll, setAutoScroll] = useState(true);
-
     const [searchQuery, setSearchQuery] = useState('');
 
     // --- Helpers ---
@@ -62,27 +61,11 @@ export function ShadowTerminal({
         prevChatLength.current = chatActions.length;
         prevTerminalLength.current = terminalActions.length;
 
-        // If new content arrived, re-enable autoscroll and scroll
+        // If new content arrived, re-enable autoscroll
         if (chatGrew || terminalGrew) {
             queueMicrotask(() => setAutoScroll(true));
         }
-
-        if (!autoScroll) return;
-
-        // Small delay to ensure DOM is updated
-        requestAnimationFrame(() => {
-            if (splitView) {
-                if (chatGrew) {
-                    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                }
-                if (terminalGrew) {
-                    bottomRefSplit.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                }
-            } else {
-                bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-            }
-        });
-    }, [chatActions.length, terminalActions.length, autoScroll, splitView]);
+    }, [chatActions.length, terminalActions.length]);
 
     return (
         <div
@@ -129,9 +112,8 @@ export function ShadowTerminal({
                         <div className="bg-emerald-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-emerald-400/80 border-b border-emerald-500/20 font-bold">CHAT</div>
                         <StreamPane
                             items={chatActions}
-                            scrollRef={scrollRef}
-                            bottomRef={bottomRef}
-                            onUserScroll={() => setAutoScroll(false)}
+                            autoScroll={autoScroll}
+                            onAutoScrollChange={setAutoScroll}
                             onApprovePermission={onApprovePermission}
                             onDenyPermission={onDenyPermission}
                         />
@@ -141,9 +123,8 @@ export function ShadowTerminal({
                         <div className="bg-amber-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-amber-400/80 border-b border-amber-500/20 font-bold">TERMINAL</div>
                         <StreamPane
                             items={terminalActions}
-                            scrollRef={scrollRefSplit}
-                            bottomRef={bottomRefSplit}
-                            onUserScroll={() => setAutoScroll(false)}
+                            autoScroll={autoScroll}
+                            onAutoScrollChange={setAutoScroll}
                             onApprovePermission={onApprovePermission}
                             onDenyPermission={onDenyPermission}
                         />
@@ -152,9 +133,8 @@ export function ShadowTerminal({
             ) : (
                 <StreamPane
                     items={actions}
-                    scrollRef={scrollRef}
-                    bottomRef={bottomRef}
-                    onUserScroll={() => setAutoScroll(false)}
+                    autoScroll={autoScroll}
+                    onAutoScrollChange={setAutoScroll}
                     onApprovePermission={onApprovePermission}
                     onDenyPermission={onDenyPermission}
                 />
@@ -165,72 +145,64 @@ export function ShadowTerminal({
 
 function StreamPane({
     items,
-    scrollRef,
-    bottomRef,
-    onUserScroll,
+    autoScroll,
+    onAutoScrollChange,
     onApprovePermission,
     onDenyPermission,
 }: {
     items: StreamItem[],
-    scrollRef: React.RefObject<HTMLDivElement | null>,
-    bottomRef: React.RefObject<HTMLDivElement | null>,
-    onUserScroll: () => void,
-    onApprovePermission?: (requestId: string) => void,
-    onDenyPermission?: (requestId: string) => void,
+    autoScroll: boolean;
+    onAutoScrollChange: (val: boolean) => void;
+    onApprovePermission?: (requestId: string) => void;
+    onDenyPermission?: (requestId: string) => void;
 }) {
-    const SCROLL_BOTTOM_THRESHOLD_PX = 24;
     return (
-        <div
-            ref={scrollRef}
-            className="flex-1 overflow-y-auto p-4 scroll-smooth min-h-0"
-            onScroll={(e) => {
-                const target = e.currentTarget;
-                const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
-                if (distanceFromBottom >= SCROLL_BOTTOM_THRESHOLD_PX) {
-                    onUserScroll();
-                }
+        <Virtuoso
+            className="h-full scroll-smooth"
+            data={items}
+            followOutput={autoScroll ? 'smooth' : false}
+            atBottomStateChange={(atBottom) => {
+                // If the user scrolls up, atBottom becomes false -> disable autoScroll
+                // If the user scrolls down to bottom, atBottom becomes true -> enable autoScroll
+                onAutoScrollChange(atBottom);
             }}
-        >
-            <div className="font-mono text-sm space-y-1.5 text-white selection:bg-white/20">
-                {items.map((action) => (
-                    <div key={action.id} className="flex gap-3 hover:bg-white/5 p-1 rounded group">
-                        <span className="opacity-60 select-none w-20 text-[11px] pt-0.5 text-cyan-400/60">{action.timestamp}</span>
-                        <span className={clsx(
-                            "w-2 h-2 rounded-full mt-1.5 shrink-0",
-                            action.type === 'error' ? 'bg-red-500' :
-                                action.type === 'command' ? 'bg-emerald-500' :
-                                    action.type === 'code' ? 'bg-amber-500' :
-                                        action.type === 'security_gate' ? 'bg-amber-400' : 'bg-blue-500'
-                        )} title={action.type} />
-                        <span className="flex-1 break-all whitespace-pre-wrap group-hover:text-white transition-colors">
-                            {action.agentId !== 'SYSTEM' && <span className="text-white/40 mr-2">[{action.agentId}]</span>}
-                            <span className="font-bold">{action.title}</span>
-                            {action.isTyping ? (
-                                <div className="mt-2">
-                                    <ThinkingIndicator phase={action.phase as 'plan' | 'build' | 'review' | 'deploy'} />
-                                </div>
-                            ) : action.content && (
-                                <div className="mt-1 opacity-80 border-l border-white/10 pl-2 ml-1">
-                                    {action.type === 'security_gate' && action.payload && typeof action.payload === 'object' ? (
-                                        <PermissionGateRow
-                                            payload={action.payload as Record<string, unknown>}
-                                            onApprove={onApprovePermission}
-                                            onDeny={onDenyPermission}
-                                        />
-                                    ) : null}
-                                    {(action.agentId === 'QWEN' || action.type === 'code') ? (
-                                        <MarkdownMessage content={action.content} />
-                                    ) : (
-                                        <span className="whitespace-pre-wrap">{action.content}</span>
-                                    )}
-                                </div>
-                            )}
-                        </span>
-                    </div>
-                ))}
-            </div>
-            <div ref={bottomRef} />
-        </div>
+            itemContent={(index, action) => (
+                <div className="flex gap-3 hover:bg-white/5 p-1 px-4 rounded group mb-1.5 first:mt-4">
+                    <span className="opacity-60 select-none w-20 text-[11px] pt-0.5 text-cyan-400/60 shrink-0">{action.timestamp}</span>
+                    <span className={clsx(
+                        "w-2 h-2 rounded-full mt-1.5 shrink-0",
+                        action.type === 'error' ? 'bg-red-500' :
+                            action.type === 'command' ? 'bg-emerald-500' :
+                                action.type === 'code' ? 'bg-amber-500' :
+                                    action.type === 'security_gate' ? 'bg-amber-400' : 'bg-blue-500'
+                    )} title={action.type} />
+                    <span className="flex-1 break-all whitespace-pre-wrap group-hover:text-white transition-colors min-w-0">
+                        {action.agentId !== 'SYSTEM' && <span className="text-white/40 mr-2">[{action.agentId}]</span>}
+                        <span className="font-bold">{action.title}</span>
+                        {action.isTyping ? (
+                            <div className="mt-2">
+                                <ThinkingIndicator phase={action.phase as 'plan' | 'build' | 'review' | 'deploy'} />
+                            </div>
+                        ) : action.content && (
+                            <div className="mt-1 opacity-80 border-l border-white/10 pl-2 ml-1">
+                                {action.type === 'security_gate' && action.payload && typeof action.payload === 'object' ? (
+                                    <PermissionGateRow
+                                        payload={action.payload as Record<string, unknown>}
+                                        onApprove={onApprovePermission}
+                                        onDeny={onDenyPermission}
+                                    />
+                                ) : null}
+                                {(action.agentId === 'QWEN' || action.type === 'code') ? (
+                                    <MarkdownMessage content={action.content} />
+                                ) : (
+                                    <span className="whitespace-pre-wrap">{action.content}</span>
+                                )}
+                            </div>
+                        )}
+                    </span>
+                </div>
+            )}
+        />
     );
 }
 

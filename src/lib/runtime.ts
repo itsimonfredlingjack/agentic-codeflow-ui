@@ -12,12 +12,47 @@ export class HostRuntime {
   private eventStream = new Subject<RuntimeEvent>();
   private terminal = new TerminalService();
   private activeRunId: string;
-  private pendingCommands = new Map<string, { header: MessageHeader; command: ParsedCommand }>();
+  private pendingCommands = new Map<string, { header: MessageHeader; command: ParsedCommand; timestamp: number }>();
+  private pruneInterval: NodeJS.Timeout;
 
   constructor(runId: string) {
     this.activeRunId = runId;
     ledger.createRun(runId);
     this.emit({ type: 'SYS_READY', header: this.createHeader(), runId });
+
+    // Check for expired pending commands every minute
+    this.pruneInterval = setInterval(() => this.prunePendingCommands(), 60_000);
+  }
+
+  public destroy() {
+    if (this.pruneInterval) {
+      clearInterval(this.pruneInterval);
+    }
+  }
+
+  private prunePendingCommands() {
+    const now = Date.now();
+    const TTL = 10 * 60 * 1000; // 10 minutes
+
+    for (const [requestId, data] of this.pendingCommands.entries()) {
+      if (now - data.timestamp > TTL) {
+        this.pendingCommands.delete(requestId);
+        this.emit({
+          type: 'WORKFLOW_ERROR',
+          header: data.header,
+          error: `Permission request ${requestId} timed out (TTL expired)`,
+          severity: 'warn',
+        });
+
+        // Also log as a security/permission event if useful
+        this.emit({
+          type: 'SECURITY_VIOLATION',
+          header: data.header,
+          policy: 'PERMISSION_TTL_EXPIRED',
+          attemptedPath: data.command.original,
+        });
+      }
+    }
   }
 
   /**
@@ -63,7 +98,11 @@ export class HostRuntime {
 
         if (decision.kind === 'require_permission') {
           const requestId = uuidv4();
-          this.pendingCommands.set(requestId, { header: intent.header, command: decision.parsed });
+          this.pendingCommands.set(requestId, {
+            header: intent.header,
+            command: decision.parsed,
+            timestamp: Date.now()
+          });
           this.emit({
             type: 'PERMISSION_REQUESTED',
             header: intent.header,
